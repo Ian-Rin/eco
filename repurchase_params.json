@@ -1,0 +1,14 @@
+{
+  "api_base": "https://datacenter-web.eastmoney.com/api/data/v1/get",
+  "params": {
+    "reportName": "RPTA_WEB_GPHG",
+    "sortColumns": "tdate",
+    "sortTypes": "-1",
+    "pageSize": "200",
+    "pageNumber": "1",
+    "columns": "ALL",
+    "token": "6b9bcf8f8c686919c11a347dce1e4daf",
+    "source": "WEB"
+  },
+  "referer": "https://data.eastmoney.com/gphg/"
+}

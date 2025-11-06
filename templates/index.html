@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>A股上市公司回购</title>
+  <link rel="preconnect" href="https://cdn.staticfile.org">
+  <script>
+    window.__loadLocalTabulatorAssets = function () {
+      if (window.__tabulatorLoading) return;
+      window.__tabulatorLoading = true;
+      if (window.__tabulatorFallbackTimer) {
+        clearTimeout(window.__tabulatorFallbackTimer);
+        window.__tabulatorFallbackTimer = null;
+      }
+      if (!document.getElementById("tabulatorLocalCss")) {
+        var css = document.createElement("link");
+        css.rel = "stylesheet";
+        css.href = "/static/vendor/tabulator.min.css";
+        css.id = "tabulatorLocalCss";
+        document.head.appendChild(css);
+      }
+      var script = document.createElement("script");
+      script.src = "/static/vendor/tabulator.min.js";
+      script.onload = function () { window.__tabulatorLoaded = true; };
+      document.head.appendChild(script);
+    };
+    window.__scheduleTabulatorFallback = function () {
+      if (window.__tabulatorFallbackTimer) return;
+      window.__tabulatorFallbackTimer = window.setTimeout(function () {
+        if (!window.__tabulatorLoaded && typeof window.Tabulator === "undefined" && typeof window.TabulatorFull === "undefined") {
+          window.__loadLocalTabulatorAssets();
+        }
+      }, 2000);
+    };
+  </script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tabulator-tables@5.5.0/dist/css/tabulator.min.css"
+        onerror="window.__loadLocalTabulatorAssets()" />
+  <script>
+    window.__loadLocalEcharts = function () {
+      if (window.__echartsLoading) return;
+      window.__echartsLoading = true;
+      var script = document.createElement("script");
+      script.src = "/static/vendor/echarts.min.js";
+      document.head.appendChild(script);
+    };
+  </script>
+  <script src="https://cdn.staticfile.org/echarts/5.5.1/echarts.min.js"
+          onerror="window.__loadLocalEcharts()" onload="window.__echartsLoaded = true;"></script>
+  <script>
+    if (!window.__echartsLoaded) {
+      window.__loadLocalEcharts();
+    }
+  </script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --col-code-width: 120px;
+      --col-name-width: 200px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      margin: 0;
+      padding: 24px 20px 40px;
+      background: var(--bg-gradient);
+      color: var(--text-primary);
+      transition: background 0.4s ease, color 0.2s ease;
+    }
+    body.dark-theme {
+      color-scheme: dark;
+      --bg-gradient: radial-gradient(circle at top, #10131a, #05060a 65%);
+      --text-primary: #e2e8f0;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --label-color: #cbd5f5;
+      --panel-bg: rgba(15, 23, 42, 0.6);
+      --panel-border: rgba(148, 163, 184, 0.1);
+      --panel-shadow: 0 18px 45px rgba(15, 23, 42, 0.55);
+      --input-bg: rgba(15, 18, 28, 0.9);
+      --input-border: rgba(148, 163, 184, 0.2);
+      --input-text: #e2e8f0;
+      --focus-border: #38bdf8;
+      --focus-shadow: rgba(56, 189, 248, 0.15);
+      --primary-button-border: rgba(56, 189, 248, 0.4);
+      --primary-button-bg: linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(99, 102, 241, 0.25));
+      --primary-button-text: #e2e8f0;
+      --primary-button-hover-shadow: 0 12px 30px rgba(56, 189, 248, 0.25);
+      --secondary-button-bg: rgba(15, 18, 28, 0.9);
+      --secondary-button-border: rgba(148, 163, 184, 0.2);
+      --secondary-button-text: #cbd5f5;
+      --chip-bg: rgba(15, 18, 28, 0.8);
+      --chip-border: rgba(148, 163, 184, 0.2);
+      --chip-text: #cbd5f5;
+      --chip-active-border: rgba(56, 189, 248, 0.6);
+      --chip-active-bg: rgba(56, 189, 248, 0.18);
+      --chip-active-text: #f8fafc;
+      --card-bg: linear-gradient(145deg, rgba(15, 23, 42, 0.95), rgba(22, 30, 50, 0.7));
+      --card-border: rgba(148, 163, 184, 0.12);
+      --card-glare: rgba(94, 234, 212, 0.12);
+      --metric-title-color: #94a3b8;
+      --metric-sub-color: #64748b;
+      --chart-card-bg: rgba(13, 18, 32, 0.9);
+      --chart-card-border: rgba(148, 163, 184, 0.12);
+      --table-card-bg: rgba(13, 18, 32, 0.92);
+      --table-card-border: rgba(148, 163, 184, 0.12);
+      --table-card-shadow: 0 24px 60px rgba(15, 23, 42, 0.5);
+      --table-head-bg: rgba(15, 23, 42, 0.8);
+      --table-border: rgba(148, 163, 184, 0.08);
+      --table-row-hover: rgba(51, 65, 85, 0.16);
+      --scrollbar-thumb: rgba(148, 163, 184, 0.35);
+      --scrollbar-track: rgba(15, 23, 42, 0.6);
+      --placeholder-text: #64748b;
+      --placeholder-border: rgba(148, 163, 184, 0.3);
+      --progress-track: rgba(51, 65, 85, 0.6);
+      --progress-fill: linear-gradient(90deg, rgba(56, 189, 248, 0.9), rgba(99, 102, 241, 0.9));
+      --accent-color: #38bdf8;
+      --accent-muted: #475569;
+      --chart-axis-color: #475569;
+      --chart-axis-label: #cbd5f5;
+      --chart-grid-line: rgba(148, 163, 184, 0.18);
+      --chart-line-color: #38bdf8;
+      --chart-area-color: rgba(56, 189, 248, 0.18);
+      --chart-slider-border: rgba(148, 163, 184, 0.3);
+      --chart-slider-fill: rgba(56, 189, 248, 0.2);
+      --chart-title-text: #94a3b8;
+      --chart-empty-text: #64748b;
+      --chart-bar-start: rgba(99, 102, 241, 0.85);
+      --chart-bar-end: rgba(37, 99, 235, 0.65);
+      --chart-bar-slider-fill: rgba(99, 102, 241, 0.2);
+    }
+    body.light-theme {
+      color-scheme: light;
+      --bg-gradient: radial-gradient(circle at top, #f8fafc, #e2e8f0 65%);
+      --text-primary: #1f2937;
+      --text-secondary: #4b5563;
+      --text-muted: #6b7280;
+      --label-color: #334155;
+      --panel-bg: rgba(255, 255, 255, 0.92);
+      --panel-border: rgba(148, 163, 184, 0.4);
+      --panel-shadow: 0 18px 38px rgba(148, 163, 184, 0.35);
+      --input-bg: #ffffff;
+      --input-border: rgba(148, 163, 184, 0.45);
+      --input-text: #1f2937;
+      --focus-border: #2563eb;
+      --focus-shadow: rgba(37, 99, 235, 0.2);
+      --primary-button-border: rgba(37, 99, 235, 0.35);
+      --primary-button-bg: linear-gradient(135deg, rgba(59, 130, 246, 0.16), rgba(37, 99, 235, 0.16));
+      --primary-button-text: #1e293b;
+      --primary-button-hover-shadow: 0 12px 30px rgba(37, 99, 235, 0.18);
+      --secondary-button-bg: #f8fafc;
+      --secondary-button-border: rgba(148, 163, 184, 0.45);
+      --secondary-button-text: #334155;
+      --chip-bg: #f1f5f9;
+      --chip-border: rgba(148, 163, 184, 0.45);
+      --chip-text: #475569;
+      --chip-active-border: rgba(37, 99, 235, 0.5);
+      --chip-active-bg: rgba(37, 99, 235, 0.16);
+      --chip-active-text: #1e293b;
+      --card-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(241, 245, 249, 0.9));
+      --card-border: rgba(148, 163, 184, 0.35);
+      --card-glare: rgba(37, 99, 235, 0.12);
+      --metric-title-color: #64748b;
+      --metric-sub-color: #6b7280;
+      --chart-card-bg: rgba(255, 255, 255, 0.94);
+      --chart-card-border: rgba(148, 163, 184, 0.3);
+      --table-card-bg: rgba(255, 255, 255, 0.95);
+      --table-card-border: rgba(148, 163, 184, 0.3);
+      --table-card-shadow: 0 24px 60px rgba(148, 163, 184, 0.25);
+      --table-head-bg: #e2e8f0;
+      --table-border: rgba(148, 163, 184, 0.45);
+      --table-row-hover: rgba(148, 163, 184, 0.15);
+      --scrollbar-thumb: rgba(148, 163, 184, 0.5);
+      --scrollbar-track: rgba(226, 232, 240, 0.9);
+      --placeholder-text: #6b7280;
+      --placeholder-border: rgba(148, 163, 184, 0.45);
+      --progress-track: rgba(226, 232, 240, 0.9);
+      --progress-fill: linear-gradient(90deg, rgba(37, 99, 235, 0.85), rgba(59, 130, 246, 0.85));
+      --accent-color: #2563eb;
+      --accent-muted: #94a3b8;
+      --chart-axis-color: #cbd5f5;
+      --chart-axis-label: #64748b;
+      --chart-grid-line: rgba(148, 163, 184, 0.25);
+      --chart-line-color: #2563eb;
+      --chart-area-color: rgba(37, 99, 235, 0.16);
+      --chart-slider-border: rgba(148, 163, 184, 0.45);
+      --chart-slider-fill: rgba(37, 99, 235, 0.2);
+      --chart-title-text: #4b5563;
+      --chart-empty-text: #9ca3af;
+      --chart-bar-start: rgba(37, 99, 235, 0.9);
+      --chart-bar-end: rgba(59, 130, 246, 0.65);
+      --chart-bar-slider-fill: rgba(37, 99, 235, 0.2);
+    }
+    a { color: inherit; }
+    .wrap { max-width: 1380px; margin: 0 auto; }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+    header h1 {
+      font-size: 28px;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-weight: 600;
+    }
+    header h1 span { font-size: 13px; color: var(--text-secondary); letter-spacing: 0.6px; }
+    .controls {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 18px;
+      padding: 16px 18px;
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      box-shadow: var(--panel-shadow);
+      transition: background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
+    }
+    .controls label {
+      font-size: 13px;
+      color: var(--label-color);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .controls input {
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--input-border);
+      background: var(--input-bg);
+      color: var(--input-text);
+      min-width: 160px;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.4s ease, color 0.4s ease;
+    }
+    .controls input::placeholder {
+      color: var(--text-muted);
+    }
+    .controls input:focus {
+      outline: none;
+      border-color: var(--focus-border);
+      box-shadow: 0 0 0 3px var(--focus-shadow);
+    }
+    .btn {
+      padding: 10px 16px;
+      border-radius: 12px;
+      border: 1px solid var(--primary-button-border);
+      background: var(--primary-button-bg);
+      color: var(--primary-button-text);
+      cursor: pointer;
+      font-weight: 600;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.4s ease, color 0.4s ease, border-color 0.4s ease;
+    }
+    .btn:hover { transform: translateY(-1px); box-shadow: var(--primary-button-hover-shadow); }
+    .btn.secondary {
+      background: var(--secondary-button-bg);
+      border-color: var(--secondary-button-border);
+      color: var(--secondary-button-text);
+    }
+    .theme-toggle {
+      align-self: flex-start;
+      white-space: nowrap;
+    }
+    .range-btns {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .range-btns button {
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--chip-border);
+      background: var(--chip-bg);
+      color: var(--chip-text);
+      cursor: pointer;
+      transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+    }
+    .range-btns button.active {
+      border-color: var(--chip-active-border);
+      background: var(--chip-active-bg);
+      color: var(--chip-active-text);
+    }
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 24px;
+      margin-bottom: 24px;
+    }
+    .metric-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 18px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: relative;
+      overflow: hidden;
+      transition: background 0.4s ease, border-color 0.4s ease, color 0.4s ease;
+    }
+    .metric-card::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at top right, var(--card-glare), transparent 55%);
+      mix-blend-mode: lighten;
+    }
+    .metric-title { font-size: 12px; letter-spacing: 0.6px; color: var(--metric-title-color); text-transform: uppercase; }
+    .metric-value { font-size: 26px; font-weight: 600; }
+    .metric-sub { font-size: 12px; color: var(--metric-sub-color); }
+    .chart-grid {
+      display: grid;
+      grid-template-columns: 5fr 4fr;
+      gap: 18px;
+    }
+    .chart-card {
+      background: var(--chart-card-bg);
+      border: 1px solid var(--chart-card-border);
+      border-radius: 18px;
+      padding: 18px;
+      position: relative;
+      min-height: 360px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: background 0.4s ease, border-color 0.4s ease;
+    }
+    .chart-card h2 {
+      margin: 0;
+      font-size: 16px;
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+    .chart-canvas {
+      flex: 1;
+      min-height: 280px;
+    }
+    .table-card {
+      margin-top: 24px;
+      background: var(--table-card-bg);
+      border: 1px solid var(--table-card-border);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: var(--table-card-shadow);
+      transition: background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
+    }
+    .table-container {
+      margin-top: 12px;
+    }
+    #tbl {
+      width: 100%;
+    }
+    .tabulator {
+      background: var(--table-card-bg);
+      border: 1px solid var(--table-card-border);
+      border-radius: 14px;
+      color: var(--text-primary);
+      font-size: 13px;
+      box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+      width: 100%;
+    }
+    .tabulator .tabulator-header {
+      background: var(--table-head-bg);
+      border-bottom: 1px solid var(--table-border);
+      color: var(--text-secondary);
+    }
+    .tabulator .tabulator-header .tabulator-col {
+      background: transparent;
+      border-right: 1px solid var(--table-border);
+    }
+    .tabulator .tabulator-header .tabulator-col:last-child {
+      border-right: none;
+    }
+    .tabulator .tabulator-col-title {
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+    .tabulator .tabulator-col.tabulator-sortable:hover {
+      color: var(--accent-color);
+    }
+    .tabulator .tabulator-col .tabulator-col-sorter {
+      color: var(--accent-color);
+    }
+    .tabulator .tabulator-tableholder {
+      overflow: auto;
+      border-radius: 0 0 14px 14px;
+      max-height: 520px;
+    }
+    .tabulator .tabulator-cell {
+      padding: 14px 16px;
+      border-right: 1px solid var(--table-border);
+      background: transparent;
+      white-space: normal;
+      line-height: 1.5;
+    }
+    .tabulator .tabulator-cell:last-child {
+      border-right: none;
+    }
+    .tabulator-row {
+      background: transparent;
+      border-bottom: 1px solid var(--table-border);
+      transition: background 0.2s ease;
+    }
+    .tabulator-row:hover {
+      background: var(--table-row-hover);
+    }
+    .tabulator-row.tabulator-row--latest {
+      background: rgba(56, 189, 248, 0.08);
+    }
+    body.light-theme .tabulator-row.tabulator-row--latest {
+      background: rgba(56, 189, 248, 0.12);
+    }
+    .tabulator-placeholder {
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+    .cell-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.2px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      background: rgba(99, 102, 241, 0.08);
+      color: var(--text-primary);
+      width: fit-content;
+    }
+    .badge--plan {
+      background: rgba(56, 189, 248, 0.14);
+      border-color: rgba(56, 189, 248, 0.24);
+      color: var(--text-primary);
+    }
+    .badge--plan-code {
+      background: rgba(59, 130, 246, 0.12);
+      border-color: rgba(59, 130, 246, 0.28);
+      color: var(--text-primary);
+      font-family: "SFMono-Regular", "JetBrains Mono", "Roboto Mono", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+      letter-spacing: 0.2px;
+    }
+    .badge--code {
+      background: rgba(99, 102, 241, 0.16);
+      border-color: rgba(99, 102, 241, 0.24);
+    }
+    .badge--latest {
+      background: rgba(250, 204, 21, 0.18);
+      border-color: rgba(250, 204, 21, 0.32);
+      color: var(--text-primary);
+    }
+    .cell-metric {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 120px;
+    }
+    .metric-primary {
+      font-weight: 600;
+      color: var(--text-primary);
+      font-size: 13px;
+    }
+    .metric-secondary {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .plan-badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .data-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .data-bar-track {
+      flex: 1;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.22);
+      overflow: hidden;
+    }
+    .data-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(56, 189, 248, 0.85), rgba(96, 165, 250, 0.85));
+      transform-origin: left center;
+    }
+    .muted { color: var(--text-muted); font-size: 12px; }
+    .progress {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .progress-track {
+      height: 8px;
+      border-radius: 999px;
+      background: var(--progress-track);
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--progress-fill);
+    }
+    .table-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    .empty-placeholder {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--placeholder-text);
+      font-size: 14px;
+      border: 1px dashed var(--placeholder-border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    @media (max-width: 1080px) {
+      .chart-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 880px) {
+      .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 600px) {
+      .dashboard-grid { grid-template-columns: 1fr; }
+      .controls input { min-width: 140px; }
+    }
+  </style>
+</head>
+<body class="dark-theme">
+  <div class="wrap">
+  <header>
+    <h1>
+      📈 A股上市公司回购
+      <span>数据源：东方财富</span>
+    </h1>
+    <button id="themeToggle" class="btn secondary theme-toggle" type="button">切换到白天模式</button>
+  </header>
+
+  <section class="controls">
+    <label>起始日期
+      <input type="date" id="date_from" value="{{ default_from }}" min="{{ min_date }}" max="{{ max_date }}"
+             data-default="{{ default_from }}" data-max="{{ max_date }}" data-min="{{ min_date }}" />
+    </label>
+    <label>结束日期
+      <input type="date" id="date_to" value="{{ max_date }}" min="{{ min_date }}" max="{{ max_date }}" />
+    </label>
+    <label>股票代码过滤
+      <input type="text" id="code" placeholder="如 600519, 000001 等，可留空" />
+    </label>
+    <label>展示条数
+      <input type="number" id="limit" min="50" max="5000" value="1000" />
+    </label>
+    <div class="range-btns">
+      <button data-range="7">近7天</button>
+      <button data-range="30" class="active">近30天</button>
+      <button data-range="90">近90天</button>
+      <button data-range="180">近半年</button>
+      <button data-range="365">近1年</button>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn" id="btnLoad">刷新界面/筛选</button>
+      <button class="btn secondary" id="btnReset">重置筛选</button>
+    </div>
+  </section>
+
+  <section class="dashboard-grid">
+    <article class="metric-card">
+      <div class="metric-title">区间累计金额</div>
+      <div class="metric-value" id="statAmount">--</div>
+      <div class="metric-sub" id="statRange">--</div>
+    </article>
+    <article class="metric-card">
+      <div class="metric-title">覆盖代码 / 计划</div>
+      <div class="metric-value" id="statCodes">--</div>
+      <div class="metric-sub">公司数 · 计划数</div>
+    </article>
+    <article class="metric-card">
+      <div class="metric-title">平均单日金额</div>
+      <div class="metric-value" id="statDaily">--</div>
+      <div class="metric-sub">按选定区间内自然日计算</div>
+    </article>
+    <article class="metric-card">
+      <div class="metric-title">最新披露日</div>
+      <div class="metric-value" id="statLatest">--</div>
+      <div class="metric-sub">列表基于该日</div>
+    </article>
+  </section>
+
+  <section class="chart-grid">
+    <div class="chart-card">
+      <h2>区间每日回购金额走势</h2>
+      <div id="trendChart" class="chart-canvas"></div>
+    </div>
+    <div class="chart-card">
+      <h2>最新披露日回购金额</h2>
+      <div id="chart" class="chart-canvas"></div>
+    </div>
+  </section>
+
+  <section class="table-card">
+    <div class="table-meta">
+      <span id="summary">加载中...</span>
+      <span>提示：点击列标题可排序 · 支持列宽拖拽</span>
+    </div>
+    <div class="table-container">
+      <div id="tbl"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+  (function () {
+    var themeTimer = null;
+    var lastTheme = null;
+    var toggleButton = null;
+
+    function preferredTheme() {
+      var hour = new Date().getHours();
+      return hour >= 6 && hour < 18 ? "light" : "dark";
+    }
+
+    function updateToggleLabel() {
+      if (!toggleButton) return;
+      var isLight = document.body.classList.contains("light-theme");
+      var text = isLight ? "切换到夜间模式" : "切换到白天模式";
+      toggleButton.textContent = text;
+      toggleButton.setAttribute("aria-label", text);
+    }
+
+    function applyTheme(theme) {
+      var body = document.body;
+      if (!body) return;
+      var wantLight = theme === "light";
+      var hasLight = body.classList.contains("light-theme");
+      var hasDark = body.classList.contains("dark-theme");
+      var already = (wantLight && hasLight && !hasDark) || (!wantLight && hasDark && !hasLight);
+      if (!already) {
+        body.classList.remove("light-theme", "dark-theme");
+        body.classList.add(wantLight ? "light-theme" : "dark-theme");
+        if (window.updateChartsTheme) {
+          window.updateChartsTheme();
+        }
+        if (window.updateTableTheme) {
+          window.updateTableTheme();
+        }
+      }
+      lastTheme = theme;
+      updateToggleLabel();
+    }
+
+    function syncTheme() {
+      var theme = preferredTheme();
+      var className = theme + "-theme";
+      if (lastTheme !== theme || !document.body.classList.contains(className)) {
+        applyTheme(theme);
+      } else {
+        updateToggleLabel();
+      }
+    }
+
+    function msUntilNextCheck() {
+      var now = new Date();
+      var hour = now.getHours();
+      var targetHour;
+      if (hour < 6) {
+        targetHour = 6;
+      } else if (hour < 18) {
+        targetHour = 18;
+      } else {
+        targetHour = 24 + 6;
+      }
+      var next = new Date(now);
+      next.setHours(targetHour, 0, 0, 0);
+      var diff = next.getTime() - now.getTime();
+      return diff < 60000 ? 60000 : diff;
+    }
+
+    function scheduleNext() {
+      if (themeTimer) {
+        clearTimeout(themeTimer);
+      }
+      themeTimer = window.setTimeout(function () {
+        syncTheme();
+        scheduleNext();
+      }, msUntilNextCheck());
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+      toggleButton = document.getElementById("themeToggle");
+      if (toggleButton) {
+        toggleButton.addEventListener("click", function () {
+          var next = document.body.classList.contains("light-theme") ? "dark" : "light";
+          applyTheme(next);
+        });
+      }
+      syncTheme();
+      scheduleNext();
+    });
+
+    window.addEventListener("visibilitychange", function () {
+      if (!document.hidden) {
+        syncTheme();
+      }
+    });
+  })();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/tabulator-tables@5.5.0/dist/js/tabulator.min.js"
+        onerror="window.__loadLocalTabulatorAssets()" onload="window.__tabulatorLoaded = true; if (window.__tabulatorFallbackTimer) { clearTimeout(window.__tabulatorFallbackTimer); }"></script>
+<script>
+  if (!window.__tabulatorLoaded) {
+    window.__scheduleTabulatorFallback();
+  }
+</script>
+<script src="/static/app.js?v={{ asset_version }}"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+aiofiles
+fastapi
+jinja2
+pandas
+requests
+uvicorn
