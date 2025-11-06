@@ -217,33 +217,70 @@ function percentOf(value, maxValue) {
 }
 
 function resolvePlanDisplay(row) {
-  const planCode = typeof row.plan_code === "string" ? row.plan_code : "";
+  const planKey = typeof row.plan_key === "string" ? row.plan_key : "";
   const planLabel = typeof row.plan_label === "string" ? row.plan_label : "";
-  const isLegacyPlan = planCode.startsWith("__DEFAULT__:");
+  const isLegacyPlan = planKey.startsWith("__DEFAULT__:");
   let planText = "--";
   if (planLabel) {
     planText = planLabel;
-  } else if (planCode && !isLegacyPlan) {
-    planText = planCode;
-  } else if (planCode && isLegacyPlan) {
+  } else if (planKey && !isLegacyPlan) {
+    planText = planKey.toUpperCase();
+  } else if (planKey && isLegacyPlan) {
     planText = "默认计划";
   }
-  let planCodeDisplay = "";
-  if (planCode) {
+
+  let planKeyDisplay = "";
+  if (planKey) {
     if (isLegacyPlan) {
-      const idx = planCode.indexOf(":");
-      planCodeDisplay = idx >= 0 ? planCode.slice(idx + 1) : "";
+      const idx = planKey.indexOf(":");
+      planKeyDisplay = idx >= 0 ? planKey.slice(idx + 1) : "";
     } else {
-      planCodeDisplay = planCode;
+      planKeyDisplay = planKey.toUpperCase();
     }
   }
+
   const planMeta = [];
-  if (row.start_date) planMeta.push("开始 " + row.start_date);
-  if (row.end_date) planMeta.push("结束 " + row.end_date);
+  if (row.plan_progress_text) planMeta.push("进度 " + row.plan_progress_text);
+  if (row.plan_announce_date) planMeta.push("公告 " + row.plan_announce_date);
+  if (row.plan_start_date) planMeta.push("生效 " + row.plan_start_date);
+
+  const priceLower = Number(row.plan_price_lower);
+  const priceUpper = Number(row.plan_price_upper);
+  const hasLower = Number.isFinite(priceLower);
+  const hasUpper = Number.isFinite(priceUpper);
+  if (hasLower && hasUpper) {
+    if (priceLower === priceUpper) {
+      planMeta.push("价格 ≤ " + fmtNumber(priceUpper, 2) + " 元");
+    } else {
+      planMeta.push("价格 " + fmtNumber(priceLower, 2) + "-" + fmtNumber(priceUpper, 2) + " 元");
+    }
+  } else if (hasUpper) {
+    planMeta.push("价格 ≤ " + fmtNumber(priceUpper, 2) + " 元");
+  } else if (hasLower) {
+    planMeta.push("价格 ≥ " + fmtNumber(priceLower, 2) + " 元");
+  }
+
+  const planAmount = Number(row.plan_amount_upper);
+  if (Number.isFinite(planAmount) && planAmount > 0) {
+    planMeta.push("金额 ≤ " + fmtAmount(planAmount));
+  }
+  const planVolume = Number(row.plan_volume_upper);
+  if (Number.isFinite(planVolume) && planVolume > 0) {
+    planMeta.push("数量 ≤ " + fmtNumber(planVolume, 0));
+  }
+  const planLatestPrice = Number(row.plan_latest_price);
+  if (Number.isFinite(planLatestPrice) && planLatestPrice > 0) {
+    planMeta.push("最新价 " + fmtNumber(planLatestPrice, 2) + " 元");
+  }
+
+  if (row.start_date) planMeta.push("记录开始 " + row.start_date);
+  if (row.end_date) planMeta.push("记录结束 " + row.end_date);
+
   return {
     planText: planText,
-    planCodeDisplay: planCodeDisplay,
-    planMeta: planMeta
+    planKeyDisplay: planKeyDisplay,
+    planMeta: planMeta,
+    isLegacyPlan: isLegacyPlan
   };
 }
 
@@ -309,15 +346,15 @@ function planFormatter(cell) {
   const planInfo = resolvePlanDisplay(data);
   const badges = [];
   const planText = planInfo.planText && planInfo.planText !== "--" ? escapeHtml(planInfo.planText) : "";
-  const planCodeDisplay = planInfo.planCodeDisplay ? escapeHtml(planInfo.planCodeDisplay) : "";
-  if (planText && planText === planCodeDisplay) {
+  const planKeyDisplay = planInfo.planKeyDisplay ? escapeHtml(planInfo.planKeyDisplay) : "";
+  if (planText && planText === planKeyDisplay) {
     badges.push('<span class="badge badge--plan" title="计划">' + planText + "</span>");
   } else {
     if (planText) {
       badges.push('<span class="badge badge--plan" title="计划名称">' + planText + "</span>");
     }
-    if (planCodeDisplay) {
-      badges.push('<span class="badge badge--plan-code" title="计划代码">' + planCodeDisplay + "</span>");
+    if (planKeyDisplay) {
+      badges.push('<span class="badge badge--plan-code" title="计划标识">' + planKeyDisplay + "</span>");
     }
   }
   if (!badges.length) {
@@ -864,12 +901,12 @@ document.addEventListener("DOMContentLoaded", function registerEvents() {
   });
 
   const defaultBtn = document.querySelector('.range-btns button.active');
-  ensureTabulatorReady().then(function onReady() {
-    renderDashboard(defaultBtn);
-  }).catch(function onTableErr(err) {
+  renderDashboard(defaultBtn);
+
+  ensureTabulatorReady().catch(function onTableErr(err) {
     console.warn(err);
-    renderDashboard(defaultBtn);
   });
+
   ensureEchartsLoaded().then(function afterLoad() {
     if (lastCharts) {
       renderTrend(lastCharts.trend || { dates: [], amounts: [] });
