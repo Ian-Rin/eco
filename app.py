@@ -57,16 +57,32 @@ def format_code(value: Union[str, int, float, None]) -> str:
     return code_str.upper()
 
 
-def build_plan_label(plan_key: str, plan_progress: Optional[str] = None, plan_announce: Optional[str] = None) -> str:
+def _normalize_label_piece(value: Optional[Any]) -> str:
+    """Convert any label component to a clean string."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    try:
+        if pd.isna(value):  # type: ignore[arg-type]
+            return ""
+    except TypeError:
+        pass
+    return str(value).strip()
+
+
+def build_plan_label(plan_key: str, plan_progress: Optional[Any] = None, plan_announce: Optional[Any] = None) -> str:
     if not plan_key:
         return ""
     if plan_key.startswith(LEGACY_PLAN_PREFIX):
         return "默认计划"
     pieces = []
-    if plan_announce:
-        pieces.append(plan_announce)
-    if plan_progress:
-        pieces.append(plan_progress)
+    plan_announce_norm = _normalize_label_piece(plan_announce)
+    if plan_announce_norm:
+        pieces.append(plan_announce_norm)
+    plan_progress_norm = _normalize_label_piece(plan_progress)
+    if plan_progress_norm:
+        pieces.append(plan_progress_norm)
     label = " · ".join([p for p in pieces if p])
     return label if label else plan_key.upper()
 
