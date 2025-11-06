@@ -226,7 +226,7 @@ def normalize_types(df: pd.DataFrame) -> pd.DataFrame:
     prog = pick(["回购进度","REPURCHASE_PROGRESS"])
     sd = pick(["回购开始日期","START_DATE"])
     ed = pick(["回购截止日期","END_DATE"])
-    plan = pick(["HKCODE","计划编号","PLAN_CODE","PLAN_ID","REPURCHASE_PLAN_ID","REPURCHASE_ID","BUYBACK_PLAN_CODE"])
+    plan = pick(["计划编号","PLAN_CODE","PLAN_ID","REPURCHASE_PLAN_ID","REPURCHASE_ID","BUYBACK_PLAN_CODE"])
 
     def normalize_code(series):
         if series is None:
