@@ -3,15 +3,21 @@
 """
 ak_plans_min.py
 从 AkShare 的 东方财富-股份回购 “计划/方案” 数据构建计划表，生成 plan_key / plan_version。
-默认自动扫描最近半年（可通过 --days 调整）所有股票的回购计划，无需手工指定代码。
+默认会通过 fetch_runner.py 所能拿到的数据范围，自动确定最早公告日期到当前系统时间的区间；
+如需限制为最近 N 天，可通过 --days 指定。
 用法：
   python ak_plans_min.py --outdir /root/1/rep --days 183
 可选写入 SQLite：
   python ak_plans_min.py --outdir . --sqlite repurchase_plan.db
 """
+import json
 import os, re, argparse, hashlib, sqlite3
-from datetime import datetime, timedelta
+from datetime import timedelta, date
+from typing import Optional
 import pandas as pd
+from pathlib import Path
+
+import fetch_runner
 
 def load_akshare_raw() -> pd.DataFrame:
     import akshare as ak
@@ -161,8 +167,8 @@ def to_sqlite(db_path: str, plans: pd.DataFrame):
         conn.commit()
     conn.close()
 
-def filter_recent(df: pd.DataFrame, days: int) -> pd.DataFrame:
-    if days <= 0:
+def filter_recent(df: pd.DataFrame, days: int, min_date: Optional[date] = None) -> pd.DataFrame:
+    if days <= 0 and not min_date:
         return df
     col = None
     for cand in ["最新公告日期", "公告日期", "披露日期", "NOTICE_DATE", "ANNOUNCE_DATE"]:
@@ -175,20 +181,62 @@ def filter_recent(df: pd.DataFrame, days: int) -> pd.DataFrame:
     if dt.isna().all():
         return df
     today = pd.Timestamp.utcnow().normalize().date()
-    cutoff = today - timedelta(days=days)
+    if min_date:
+        cutoff = min(min_date, today)
+    else:
+        cutoff = today - timedelta(days=days)
     mask = dt.dt.date >= cutoff
     return df.loc[mask]
+
+
+def detect_fetch_runner_start() -> Optional[date]:
+    cfg_path = getattr(fetch_runner, "PARAMS_PATH", Path(__file__).resolve().parent / "repurchase_params.json")
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception:
+        return None
+
+    api_base = cfg.get("api_base")
+    params = cfg.get("params") or {}
+    referer = cfg.get("referer")
+    if not api_base or not params:
+        return None
+
+    df = fetch_runner.fetch_all(api_base, params, referer, max_pages=20, sleep_s=0.7)
+    if df.empty:
+        return None
+
+    df = fetch_runner.normalize(df)
+    for cand in ["公告日期", "披露日期", "TDATE", "NOTICE_DATE", "ANNOUNCE_DATE"]:
+        if cand in df.columns:
+            dates = pd.to_datetime(df[cand], errors="coerce")
+            dates = dates.dropna()
+            if not dates.empty:
+                return dates.min().date()
+    return None
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--outdir", default=".")
     ap.add_argument("--sqlite", default="", help="写入 SQLite 的文件名（可选）")
-    ap.add_argument("--days", type=int, default=183, help="仅保留最近 N 天内公告的计划，默认 183 天≈半年；<=0 表示不过滤")
+    ap.add_argument(
+        "--days",
+        type=int,
+        default=0,
+        help="仅保留最近 N 天内公告的计划；默认自动检测 plans_all.csv 的最早公告日期",
+    )
     args = ap.parse_args()
 
     raw = load_akshare_raw()
-    raw = filter_recent(raw, args.days)
+    min_date = None
+    if args.days <= 0:
+        min_date = detect_fetch_runner_start()
+        if min_date:
+            today = pd.Timestamp.utcnow().normalize().date()
+            print(f"[INFO] 使用 fetch_runner 最早可获取的公告日期 {min_date} 至 {today} 作为过滤范围")
+    raw = filter_recent(raw, args.days, min_date=min_date)
 
     if raw.empty:
         print("[INFO] 目标区间无回购相关记录（或源站限流）。已输出空表。")
