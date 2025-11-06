@@ -7,13 +7,14 @@ BASE_DIR = Path(__file__).resolve().parent
 DB = BASE_DIR / "repurchase.db"
 LATEST_CSV = BASE_DIR / "repurchase_latest.csv"
 INCREMENT_CSV = BASE_DIR / "repurchase_increment.csv"
+PLANS_CSV = BASE_DIR / "plans_all.csv"
 
 LEGACY_PLAN_PREFIX = "__DEFAULT__:"
 
 schema = """
 CREATE TABLE IF NOT EXISTS buyback (
   code TEXT NOT NULL,
-  plan_code TEXT NOT NULL,
+  plan_key TEXT NOT NULL,
   name TEXT,
   date TEXT NOT NULL,
   amount REAL,
@@ -22,7 +23,7 @@ CREATE TABLE IF NOT EXISTS buyback (
   progress TEXT,
   start_date TEXT,
   end_date TEXT,
-  PRIMARY KEY (code, plan_code, date)
+  PRIMARY KEY (code, plan_key, date)
 );
 """
 
@@ -38,36 +39,175 @@ def ensure_buyback_table(conn: sqlite3.Connection) -> None:
 
     cur.execute("PRAGMA table_info(buyback)")
     info = cur.fetchall()
-    has_plan_code = any(col[1] == "plan_code" for col in info)
-    if has_plan_code:
+    columns = {col[1] for col in info}
+    if "plan_key" in columns:
         return
+    has_plan_code = "plan_code" in columns
 
-    # legacy schema migration: add plan_code while keeping historical rows
+    # legacy schema migration: replace plan_code -> plan_key while keeping historical rows
     cur.execute("ALTER TABLE buyback RENAME TO buyback_legacy")
     conn.commit()
     cur.executescript(schema)
     conn.commit()
-    cur.execute(
-        """
-        INSERT INTO buyback(code, plan_code, name, date, amount, volume, avg_price, progress, start_date, end_date)
-        SELECT
-            code,
-            ? || COALESCE(NULLIF(code, ''), 'UNKNOWN'),
-            name,
-            date,
-            amount,
-            volume,
-            avg_price,
-            progress,
-            start_date,
-            end_date
-        FROM buyback_legacy
-        """,
-        (LEGACY_PLAN_PREFIX,),
-    )
+    if has_plan_code:
+        cur.execute(
+            """
+            INSERT INTO buyback(code, plan_key, name, date, amount, volume, avg_price, progress, start_date, end_date)
+            SELECT
+                code,
+                COALESCE(NULLIF(plan_code,''), ? || COALESCE(NULLIF(code,''), 'UNKNOWN')),
+                name,
+                date,
+                amount,
+                volume,
+                avg_price,
+                progress,
+                start_date,
+                end_date
+            FROM buyback_legacy
+            """,
+            (LEGACY_PLAN_PREFIX,),
+        )
+    else:
+        cur.execute(
+            """
+            INSERT INTO buyback(code, plan_key, name, date, amount, volume, avg_price, progress, start_date, end_date)
+            SELECT
+                code,
+                ? || COALESCE(NULLIF(code,''), 'UNKNOWN'),
+                name,
+                date,
+                amount,
+                volume,
+                avg_price,
+                progress,
+                start_date,
+                end_date
+            FROM buyback_legacy
+            """,
+            (LEGACY_PLAN_PREFIX,),
+        )
     conn.commit()
     cur.execute("DROP TABLE IF EXISTS buyback_legacy")
     conn.commit()
+
+
+def normalize_code_value(value: Any) -> Any:
+    if pd.isna(value):
+        return pd.NA
+    if isinstance(value, (int, float)):
+        if float(value).is_integer():
+            return f"{int(value):06d}"
+        return str(value).strip()
+    value_str = str(value).strip()
+    if not value_str:
+        return pd.NA
+    try:
+        numeric = float(value_str)
+        if numeric.is_integer():
+            return f"{int(numeric):06d}"
+    except ValueError:
+        pass
+    if value_str.isdigit() and len(value_str) < 6:
+        return value_str.zfill(6)
+    return value_str.upper()
+
+
+def load_plan_reference(conn: sqlite3.Connection) -> pd.DataFrame:
+    try:
+        plans = pd.read_sql_query(
+            """
+            SELECT code, plan_key, version, announce_date, start_date,
+                   price_lower, price_upper, amount_upper, volume_upper,
+                   latest_price, progress_text
+            FROM ak_plans
+            """,
+            conn,
+        )
+    except Exception:
+        plans = pd.DataFrame()
+
+    if plans.empty and PLANS_CSV.exists():
+        try:
+            plans = pd.read_csv(PLANS_CSV, encoding="utf-8-sig")
+        except Exception:
+            plans = pd.DataFrame()
+
+    if plans.empty:
+        return plans
+
+    plans["code"] = plans["code"].apply(normalize_code_value)
+    plans["plan_key"] = plans["plan_key"].fillna("").astype(str).str.strip()
+    plans = plans[plans["plan_key"] != ""]
+    if plans.empty:
+        return plans
+
+    plans["announce_date"] = pd.to_datetime(plans["announce_date"], errors="coerce")
+    plans["start_date"] = pd.to_datetime(plans["start_date"], errors="coerce")
+    plans["price_lower"] = pd.to_numeric(plans.get("price_lower"), errors="coerce")
+    plans["price_upper"] = pd.to_numeric(plans.get("price_upper"), errors="coerce")
+    plans["amount_upper"] = pd.to_numeric(plans.get("amount_upper"), errors="coerce")
+    plans["volume_upper"] = pd.to_numeric(plans.get("volume_upper"), errors="coerce")
+    plans["latest_price"] = pd.to_numeric(plans.get("latest_price"), errors="coerce")
+
+    if "version" in plans.columns:
+        plans = plans.sort_values(["code", "plan_key", "version"], ascending=[True, True, False])
+        plans = plans.drop_duplicates(subset=["code", "plan_key"], keep="first")
+
+    plans = plans.sort_values(["code", "announce_date", "plan_key"], kind="mergesort")
+    return plans
+
+
+def assign_plan_keys(buy_df: pd.DataFrame, plan_df: pd.DataFrame) -> pd.DataFrame:
+    if buy_df.empty or plan_df.empty:
+        return buy_df
+
+    plans = plan_df.copy()
+    plans = plans.dropna(subset=["announce_date"])
+    if plans.empty:
+        return buy_df
+
+    plans = plans.rename(columns={"announce_date": "announce_dt"})
+    plans["announce_dt"] = pd.to_datetime(plans["announce_dt"], errors="coerce")
+    plans["start_dt"] = pd.to_datetime(plans.get("start_date"), errors="coerce")
+    plans = plans.dropna(subset=["announce_dt"])
+    plans = plans.sort_values(["code", "announce_dt", "plan_key"], kind="mergesort").reset_index(drop=True)
+
+    plan_dict: dict[str, list[dict[str, Any]]] = {}
+    for code, group in plans.groupby("code", sort=False):
+        plan_dict[str(code)] = group.to_dict("records")
+
+    work = buy_df.reset_index(drop=True).copy()
+    work["plan_key"] = work["plan_key"].fillna("").astype(str).str.strip()
+    work["code"] = work["code"].apply(normalize_code_value)
+    work["date_dt"] = pd.to_datetime(work["date"], errors="coerce")
+
+    for idx, row in work.iterrows():
+        date_val = row.get("date_dt")
+        if pd.isna(date_val):
+            continue
+        code_val = row.get("code")
+        if pd.isna(code_val):
+            continue
+        candidates = plan_dict.get(str(code_val))
+        if not candidates:
+            continue
+        chosen_key = None
+        for plan in reversed(candidates):
+            ann = plan.get("announce_dt")
+            if pd.isna(ann) or ann > date_val:
+                continue
+            start_dt = plan.get("start_dt")
+            if pd.notna(start_dt) and start_dt > date_val:
+                continue
+            chosen_key = plan.get("plan_key")
+            if chosen_key:
+                break
+        if chosen_key:
+            work.at[idx, "plan_key"] = chosen_key
+
+    work.drop(columns=["date_dt"], inplace=True)
+    return work
 
 
 def normalize_types(df: pd.DataFrame) -> pd.DataFrame:
@@ -91,33 +231,7 @@ def normalize_types(df: pd.DataFrame) -> pd.DataFrame:
     def normalize_code(series):
         if series is None:
             return pd.Series(dtype="string")
-
-        def to_code(value: Any) -> Any:
-            if pd.isna(value):
-                return pd.NA
-            # 处理数值类型（含 2352.0 这类浮点表示）
-            if isinstance(value, (int, float)):
-                if float(value).is_integer():
-                    return f"{int(value):06d}"
-                return str(value).strip()
-
-            value_str = str(value).strip()
-            if not value_str:
-                return pd.NA
-
-            # 字符串形式的浮点数（例如 "2352.0"）
-            try:
-                numeric = float(value_str)
-                if numeric.is_integer():
-                    return f"{int(numeric):06d}"
-            except ValueError:
-                pass
-
-            if value_str.isdigit() and len(value_str) < 6:
-                return value_str.zfill(6)
-            return value_str.upper()
-
-        return series.apply(to_code).astype("string")
+        return series.apply(normalize_code_value).astype("string")
 
     # 日期列安全转换
     def safe_date(col):
@@ -148,7 +262,7 @@ def normalize_types(df: pd.DataFrame) -> pd.DataFrame:
 
     out = pd.DataFrame({
         "code": normalize_code(df.get(code)),
-        "plan_code": normalize_plan(df.get(plan)),
+        "plan_key": normalize_plan(df.get(plan)),
         "name": df.get(name),
         "date": safe_date(date),
         "amount": pd.to_numeric(df.get(amount), errors="coerce"),
@@ -162,14 +276,14 @@ def normalize_types(df: pd.DataFrame) -> pd.DataFrame:
     # 去掉 code/date 缺失的行
     out = out.dropna(subset=["code", "date"])
 
-    if "plan_code" not in out.columns:
-        out["plan_code"] = pd.Series(dtype="string")
+    if "plan_key" not in out.columns:
+        out["plan_key"] = pd.Series(dtype="string")
 
     if not out.empty:
-        out["plan_code"] = out["plan_code"].fillna(pd.NA)
-        mask = out["plan_code"].isna() | (out["plan_code"].str.strip() == "")
+        out["plan_key"] = out["plan_key"].fillna(pd.NA)
+        mask = out["plan_key"].isna() | (out["plan_key"].str.strip() == "")
         if mask.any():
-            out.loc[mask, "plan_code"] = (
+            out.loc[mask, "plan_key"] = (
                 LEGACY_PLAN_PREFIX + out.loc[mask, "code"].fillna("UNKNOWN")
             )
 
@@ -191,18 +305,30 @@ def load_to_db(
 
     raw_df = pd.concat(sources, ignore_index=True)
     df = normalize_types(raw_df)
-    df = df.drop_duplicates(subset=["code", "plan_code", "date"], keep="last")
 
     conn = sqlite3.connect(db_path)
     ensure_buyback_table(conn)
+    plan_reference = load_plan_reference(conn)
+    df = assign_plan_keys(df, plan_reference)
+
+    if not df.empty:
+        df["plan_key"] = df["plan_key"].fillna(pd.NA)
+        missing = df["plan_key"].isna() | (df["plan_key"].str.strip() == "")
+        if missing.any():
+            df.loc[missing, "plan_key"] = (
+                LEGACY_PLAN_PREFIX + df.loc[missing, "code"].fillna("UNKNOWN")
+            )
+
+    df = df.drop_duplicates(subset=["code", "plan_key", "date"], keep="last")
+
     cur = conn.cursor()
 
     rows = 0
     for rec in df.itertuples(index=False):
         cur.execute("""
-            INSERT INTO buyback(code,plan_code,name,date,amount,volume,avg_price,progress,start_date,end_date)
+            INSERT INTO buyback(code,plan_key,name,date,amount,volume,avg_price,progress,start_date,end_date)
             VALUES(?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(code,plan_code,date) DO UPDATE SET
+            ON CONFLICT(code,plan_key,date) DO UPDATE SET
                 name=excluded.name,
                 amount=COALESCE(excluded.amount,buyback.amount),
                 volume=COALESCE(excluded.volume,buyback.volume),
@@ -214,12 +340,12 @@ def load_to_db(
         rows += 1
     cur.execute("""
         DELETE FROM buyback
-        WHERE plan_code GLOB ?
+        WHERE plan_key GLOB ?
           AND EXISTS (
             SELECT 1 FROM buyback AS newer
             WHERE newer.code = buyback.code
               AND newer.date = buyback.date
-              AND newer.plan_code <> buyback.plan_code
+              AND newer.plan_key <> buyback.plan_key
         )
     """, (f"{LEGACY_PLAN_PREFIX}*",))
     conn.commit(); conn.close()

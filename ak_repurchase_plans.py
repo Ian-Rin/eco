@@ -2,13 +2,15 @@
 # -*- coding: utf-8 -*-
 """
 ak_plans_min.py
-从 AkShare 的 东方财富-股份回购 “计划/方案” 数据构建计划表，支持多股票筛选，生成 plan_key / plan_version。
+从 AkShare 的 东方财富-股份回购 “计划/方案” 数据构建计划表，生成 plan_key / plan_version。
+默认自动扫描最近半年（可通过 --days 调整）所有股票的回购计划，无需手工指定代码。
 用法：
-  python ak_plans_min.py --codes 000333,600519 --outdir /root/1/rep
+  python ak_plans_min.py --outdir /root/1/rep --days 183
 可选写入 SQLite：
-  python ak_plans_min.py --codes 000333 --outdir . --sqlite repurchase_plan.db
+  python ak_plans_min.py --outdir . --sqlite repurchase_plan.db
 """
 import os, re, argparse, hashlib, sqlite3
+from datetime import datetime, timedelta
 import pandas as pd
 
 def load_akshare_raw() -> pd.DataFrame:
@@ -136,7 +138,9 @@ def detect_overlap(plans: pd.DataFrame) -> pd.DataFrame:
 
 def to_sqlite(db_path: str, plans: pd.DataFrame):
     if not db_path: return
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    directory = os.path.dirname(db_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     cur.execute("""
@@ -151,33 +155,40 @@ def to_sqlite(db_path: str, plans: pd.DataFrame):
     if not plans.empty:
         plans.to_sql("tmp_ak_plans", conn, if_exists="replace", index=False)
         cur.executescript("""
-        INSERT INTO ak_plans
-        SELECT * FROM tmp_ak_plans
-        ON CONFLICT(code,plan_key,version) DO UPDATE SET
-          sec_name=excluded.sec_name,
-          announce_date=excluded.announce_date,
-          start_date=excluded.start_date,
-          price_lower=excluded.price_lower,
-          price_upper=excluded.price_upper,
-          amount_upper=excluded.amount_upper,
-          volume_upper=excluded.volume_upper,
-          latest_price=excluded.latest_price,
-          progress_text=excluded.progress_text;
+        INSERT OR REPLACE INTO ak_plans
+        SELECT * FROM tmp_ak_plans;
         DROP TABLE tmp_ak_plans;""")
         conn.commit()
     conn.close()
 
+def filter_recent(df: pd.DataFrame, days: int) -> pd.DataFrame:
+    if days <= 0:
+        return df
+    col = None
+    for cand in ["最新公告日期", "公告日期", "披露日期", "NOTICE_DATE", "ANNOUNCE_DATE"]:
+        if cand in df.columns:
+            col = cand
+            break
+    if not col:
+        return df
+    dt = pd.to_datetime(df[col], errors="coerce")
+    if dt.isna().all():
+        return df
+    today = pd.Timestamp.utcnow().normalize().date()
+    cutoff = today - timedelta(days=days)
+    mask = dt.dt.date >= cutoff
+    return df.loc[mask]
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--codes", required=True, help="逗号分隔，如 000333,600519")
     ap.add_argument("--outdir", default=".")
     ap.add_argument("--sqlite", default="", help="写入 SQLite 的文件名（可选）")
+    ap.add_argument("--days", type=int, default=183, help="仅保留最近 N 天内公告的计划，默认 183 天≈半年；<=0 表示不过滤")
     args = ap.parse_args()
 
-    codes = [c.strip() for c in args.codes.split(",") if c.strip()]
     raw = load_akshare_raw()
-    # 只保留目标股票
-    raw = raw[ raw.get("股票代码").astype(str).isin(codes) ]
+    raw = filter_recent(raw, args.days)
 
     if raw.empty:
         print("[INFO] 目标区间无回购相关记录（或源站限流）。已输出空表。")
@@ -189,20 +200,21 @@ def main():
         ])
         os.makedirs(args.outdir, exist_ok=True)
         empty.to_csv(os.path.join(args.outdir, "plans_all.csv"), index=False, encoding="utf-8-sig")
+        to_sqlite(args.sqlite, empty)
         return
 
     plans = normalize(raw)
     overlaps = detect_overlap(plans)
 
+    uniq_codes = sorted(set(plans["code"].dropna().astype(str)))
+    print(f"[INFO] 检测到 {len(uniq_codes)} 只股票的回购计划，输出目录: {os.path.abspath(args.outdir)}")
+
     os.makedirs(args.outdir, exist_ok=True)
     plans.to_csv(os.path.join(args.outdir, "plans_all.csv"), index=False, encoding="utf-8-sig")
     overlaps.to_csv(os.path.join(args.outdir, "plans_overlap_hint.csv"), index=False, encoding="utf-8-sig")
+    to_sqlite(args.sqlite, plans)
     print(f"[OK] 导出: {os.path.join(args.outdir, 'plans_all.csv')}")
     print(f"[OK] 导出: {os.path.join(args.outdir, 'plans_overlap_hint.csv')}  (经验规则提示并行计划, 可人工复核)")
-
-    if args.sqlite:
-        to_sqlite(os.path.join(args.outdir, args.sqlite), plans)
-        print(f"[OK] SQLite -> {os.path.join(args.outdir, args.sqlite)} (table: ak_plans)")
 
 if __name__ == "__main__":
     main()

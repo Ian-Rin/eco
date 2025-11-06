@@ -57,10 +57,66 @@ def format_code(value: Union[str, int, float, None]) -> str:
     return code_str.upper()
 
 
-def build_plan_label(plan_code: str) -> str:
-    if not plan_code:
+def build_plan_label(plan_key: str, plan_progress: Optional[str] = None, plan_announce: Optional[str] = None) -> str:
+    if not plan_key:
         return ""
-    return "默认计划" if plan_code.startswith(LEGACY_PLAN_PREFIX) else plan_code
+    if plan_key.startswith(LEGACY_PLAN_PREFIX):
+        return "默认计划"
+    pieces = []
+    if plan_announce:
+        pieces.append(plan_announce)
+    if plan_progress:
+        pieces.append(plan_progress)
+    label = " · ".join([p for p in pieces if p])
+    return label if label else plan_key.upper()
+
+
+@lru_cache(maxsize=1)
+def load_plan_reference() -> pd.DataFrame:
+    try:
+        plans = read_sql(
+            """
+            SELECT code, plan_key, version, announce_date, start_date,
+                   price_lower, price_upper, amount_upper, volume_upper,
+                   latest_price, progress_text
+            FROM ak_plans
+            """
+        )
+    except Exception:
+        plans = pd.DataFrame()
+
+    if plans.empty:
+        csv_path = BASE_DIR / "plans_all.csv"
+        if csv_path.exists():
+            try:
+                plans = pd.read_csv(csv_path, encoding="utf-8-sig")
+            except Exception:
+                plans = pd.DataFrame()
+
+    if plans.empty:
+        return plans
+
+    plans["code"] = plans["code"].apply(format_code)
+    plans["plan_key"] = plans["plan_key"].fillna("").astype(str).str.strip()
+    plans = plans[plans["plan_key"] != ""]
+    if plans.empty:
+        return plans
+
+    if "version" in plans.columns:
+        plans = plans.sort_values(["code", "plan_key", "version"], ascending=[True, True, False])
+        plans = plans.drop_duplicates(subset=["code", "plan_key"], keep="first")
+
+    plans["announce_date"] = pd.to_datetime(plans.get("announce_date"), errors="coerce")
+    plans["start_date"] = pd.to_datetime(plans.get("start_date"), errors="coerce")
+    plans["price_lower"] = pd.to_numeric(plans.get("price_lower"), errors="coerce")
+    plans["price_upper"] = pd.to_numeric(plans.get("price_upper"), errors="coerce")
+    plans["amount_upper"] = pd.to_numeric(plans.get("amount_upper"), errors="coerce")
+    plans["volume_upper"] = pd.to_numeric(plans.get("volume_upper"), errors="coerce")
+    plans["latest_price"] = pd.to_numeric(plans.get("latest_price"), errors="coerce")
+    if "progress_text" not in plans.columns:
+        plans["progress_text"] = pd.NA
+    plans = plans.sort_values(["code", "announce_date", "plan_key"], kind="mergesort")
+    return plans
 
 
 def load_buyback(
@@ -69,7 +125,7 @@ def load_buyback(
     code: str
 ) -> pd.DataFrame:
     query = """
-    SELECT code,plan_code,name,date,amount,volume,avg_price,progress,start_date,end_date
+    SELECT code,plan_key,name,date,amount,volume,avg_price,progress,start_date,end_date
     FROM buyback
     WHERE date >= ?
     """
@@ -96,7 +152,7 @@ def load_buyback(
     # 基础类型清洗
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["code"] = df["code"].apply(format_code)
-    df["plan_code"] = df["plan_code"].fillna("").astype(str).str.strip()
+    df["plan_key"] = df["plan_key"].fillna("").astype(str).str.strip()
     df["name"] = df["name"].fillna("").astype(str)
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
     df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0.0)
@@ -107,20 +163,68 @@ def load_buyback(
 
     df = df.dropna(subset=["code", "date"])
     df = df[df["code"] != ""]
-    mask = df["plan_code"] == ""
+    mask = df["plan_key"] == ""
     if mask.any():
-        df.loc[mask, "plan_code"] = (
+        df.loc[mask, "plan_key"] = (
             LEGACY_PLAN_PREFIX + df.loc[mask, "code"].fillna("UNKNOWN")
         )
-    df["plan_label"] = df["plan_code"].apply(build_plan_label)
+    plan_ref = load_plan_reference()
+    plan_meta = pd.DataFrame()
+    if not plan_ref.empty:
+        plan_meta = plan_ref.rename(columns={
+            "plan_key": "plan_key",
+            "announce_date": "plan_announce_dt",
+            "start_date": "plan_start_dt",
+            "price_lower": "plan_price_lower",
+            "price_upper": "plan_price_upper",
+            "amount_upper": "plan_amount_upper",
+            "volume_upper": "plan_volume_upper",
+            "latest_price": "plan_latest_price",
+            "progress_text": "plan_progress_text",
+        })
+        plan_meta["plan_announce_date"] = plan_meta["plan_announce_dt"].dt.strftime("%Y-%m-%d")
+        plan_meta["plan_start_date"] = plan_meta["plan_start_dt"].dt.strftime("%Y-%m-%d")
+        plan_meta = plan_meta[[
+            "code",
+            "plan_key",
+            "plan_announce_dt",
+            "plan_start_dt",
+            "plan_announce_date",
+            "plan_start_date",
+            "plan_price_lower",
+            "plan_price_upper",
+            "plan_amount_upper",
+            "plan_volume_upper",
+            "plan_latest_price",
+            "plan_progress_text",
+        ]]
+        df = df.merge(plan_meta, on=["code", "plan_key"], how="left")
+    else:
+        df["plan_announce_date"] = None
+        df["plan_start_date"] = None
+        df["plan_price_lower"] = pd.NA
+        df["plan_price_upper"] = pd.NA
+        df["plan_amount_upper"] = pd.NA
+        df["plan_volume_upper"] = pd.NA
+        df["plan_latest_price"] = pd.NA
+        df["plan_progress_text"] = None
+
+    df["plan_label"] = df.apply(
+        lambda row: build_plan_label(
+            row.get("plan_key", ""),
+            row.get("plan_progress_text"),
+            row.get("plan_announce_date")
+        ),
+        axis=1
+    )
 
     # 分组累计（按计划维度）
-    df = df.sort_values(["code", "plan_code", "date"])
-    df["cumulative_amount"] = df.groupby(["code", "plan_code"])["amount"].cumsum()
-    df["cumulative_volume"] = df.groupby(["code", "plan_code"])["volume"].cumsum()
+    df = df.sort_values(["code", "plan_key", "date"])
+    df["cumulative_amount"] = df.groupby(["code", "plan_key"])["amount"].cumsum()
+    df["cumulative_volume"] = df.groupby(["code", "plan_key"])["volume"].cumsum()
 
     # 计算进度百分比（针对单一计划）
-    total_per_plan = df.groupby(["code", "plan_code"])["cumulative_amount"].transform("max").replace(0, pd.NA)
+    total_per_plan = df.groupby(["code", "plan_key"])["cumulative_amount"].transform("max").replace(0, pd.NA)
     df["progress_pct"] = ((df["cumulative_amount"] / total_per_plan) * 100).round(2)
     df["progress_pct"] = df["progress_pct"].fillna(0.0)
 
@@ -159,7 +263,7 @@ def build_dashboard_payload(
     total_amount = float(df["amount"].sum())
     total_volume = float(df["volume"].sum())
     unique_codes = int(df["code"].nunique())
-    unique_plans = int(df[["code", "plan_code"]].drop_duplicates().shape[0])
+    unique_plans = int(df[["code", "plan_key"]].drop_duplicates().shape[0])
     distinct_dates = df["date_str"].nunique()
     avg_daily_amount = float(total_amount / distinct_dates) if distinct_dates else 0.0
     latest_date = df["date"].max()
@@ -195,7 +299,7 @@ def build_dashboard_payload(
 
     # 表格数据（按日期/金额排序）
     table_df = df.sort_values(
-        ["date", "code", "plan_code", "amount"],
+        ["date", "code", "plan_key", "amount"],
         ascending=[False, True, True, False]
     ).head(limit)
     table_records: List[Dict[str, Any]] = []
@@ -203,7 +307,7 @@ def build_dashboard_payload(
         table_records.append({
             "code": row.code,
             "name": row.name,
-            "plan_code": row.plan_code,
+            "plan_key": row.plan_key,
             "plan_label": row.plan_label,
             "date": row.date.strftime("%Y-%m-%d"),
             "amount": float(row.amount),
@@ -212,6 +316,14 @@ def build_dashboard_payload(
             "cumulative_volume": float(row.cumulative_volume),
             "avg_price": float(row.avg_price) if pd.notna(row.avg_price) else None,
             "progress_text": row.progress,
+            "plan_progress_text": row.plan_progress_text if isinstance(row.plan_progress_text, str) else None,
+            "plan_amount_upper": float(row.plan_amount_upper) if pd.notna(row.plan_amount_upper) else None,
+            "plan_volume_upper": float(row.plan_volume_upper) if pd.notna(row.plan_volume_upper) else None,
+            "plan_price_lower": float(row.plan_price_lower) if pd.notna(row.plan_price_lower) else None,
+            "plan_price_upper": float(row.plan_price_upper) if pd.notna(row.plan_price_upper) else None,
+            "plan_latest_price": float(row.plan_latest_price) if pd.notna(row.plan_latest_price) else None,
+            "plan_announce_date": row.plan_announce_date if isinstance(row.plan_announce_date, str) else None,
+            "plan_start_date": row.plan_start_date if isinstance(row.plan_start_date, str) else None,
             "progress_pct": float(row.progress_pct),
             "start_date": row.start_date.strftime("%Y-%m-%d") if pd.notna(row.start_date) else None,
             "end_date": row.end_date.strftime("%Y-%m-%d") if pd.notna(row.end_date) else None

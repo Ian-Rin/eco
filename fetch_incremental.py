@@ -22,7 +22,7 @@ def max_date():
     c.execute("""
         CREATE TABLE IF NOT EXISTS buyback (
             code TEXT NOT NULL,
-            plan_code TEXT NOT NULL,
+            plan_key TEXT NOT NULL,
             name TEXT,
             date TEXT NOT NULL,
             amount REAL,
@@ -31,7 +31,7 @@ def max_date():
             progress TEXT,
             start_date TEXT,
             end_date TEXT,
-            PRIMARY KEY(code,plan_code,date)
+            PRIMARY KEY(code,plan_key,date)
         );
     """)
     c.execute("SELECT MAX(date) FROM buyback"); row=c.fetchone(); conn.close()
