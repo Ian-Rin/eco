@@ -3,17 +3,21 @@
 """
 ak_plans_min.py
 从 AkShare 的 东方财富-股份回购 “计划/方案” 数据构建计划表，生成 plan_key / plan_version。
-默认会读取输出目录已有的 plans_all.csv，按其中最早的公告日期到当前系统时间拉取数据；
+默认会通过 fetch_runner.py 所能拿到的数据范围，自动确定最早公告日期到当前系统时间的区间；
 如需限制为最近 N 天，可通过 --days 指定。
 用法：
   python ak_plans_min.py --outdir /root/1/rep --days 183
 可选写入 SQLite：
   python ak_plans_min.py --outdir . --sqlite repurchase_plan.db
 """
+import json
 import os, re, argparse, hashlib, sqlite3
 from datetime import timedelta, date
 from typing import Optional
 import pandas as pd
+from pathlib import Path
+
+import fetch_runner
 
 def load_akshare_raw() -> pd.DataFrame:
     import akshare as ak
@@ -185,19 +189,28 @@ def filter_recent(df: pd.DataFrame, days: int, min_date: Optional[date] = None) 
     return df.loc[mask]
 
 
-def detect_existing_start(outdir: str) -> Optional[date]:
-    path = os.path.join(outdir or ".", "plans_all.csv")
-    if not os.path.exists(path):
-        return None
+def detect_fetch_runner_start() -> Optional[date]:
+    cfg_path = getattr(fetch_runner, "PARAMS_PATH", Path(__file__).resolve().parent / "repurchase_params.json")
     try:
-        existing = pd.read_csv(path, encoding="utf-8-sig")
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
     except Exception:
         return None
-    if existing.empty:
+
+    api_base = cfg.get("api_base")
+    params = cfg.get("params") or {}
+    referer = cfg.get("referer")
+    if not api_base or not params:
         return None
-    for cand in ["announce_date", "最新公告日期", "公告日期"]:
-        if cand in existing.columns:
-            dates = pd.to_datetime(existing[cand], errors="coerce")
+
+    df = fetch_runner.fetch_all(api_base, params, referer, max_pages=20, sleep_s=0.7)
+    if df.empty:
+        return None
+
+    df = fetch_runner.normalize(df)
+    for cand in ["公告日期", "披露日期", "TDATE", "NOTICE_DATE", "ANNOUNCE_DATE"]:
+        if cand in df.columns:
+            dates = pd.to_datetime(df[cand], errors="coerce")
             dates = dates.dropna()
             if not dates.empty:
                 return dates.min().date()
@@ -219,10 +232,10 @@ def main():
     raw = load_akshare_raw()
     min_date = None
     if args.days <= 0:
-        min_date = detect_existing_start(args.outdir)
+        min_date = detect_fetch_runner_start()
         if min_date:
             today = pd.Timestamp.utcnow().normalize().date()
-            print(f"[INFO] 使用历史最早公告日期 {min_date} 至 {today} 作为过滤范围")
+            print(f"[INFO] 使用 fetch_runner 最早可获取的公告日期 {min_date} 至 {today} 作为过滤范围")
     raw = filter_recent(raw, args.days, min_date=min_date)
 
     if raw.empty:
