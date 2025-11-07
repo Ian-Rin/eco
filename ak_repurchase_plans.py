@@ -189,6 +189,65 @@ def filter_recent(df: pd.DataFrame, days: int, min_date: Optional[date] = None) 
     return df.loc[mask]
 
 
+def detect_existing_plans_start(outdir: str, sqlite_path: str = "") -> Optional[date]:
+    """尝试从现有 CSV/SQLite 中找出最早公告日，避免额外网络请求"""
+    csv_candidates = []
+    outdir_path = Path(outdir or ".").expanduser().resolve()
+    csv_candidates.append(outdir_path / "plans_all.csv")
+    repo_csv = Path(__file__).resolve().parent / "plans_all.csv"
+    if repo_csv not in csv_candidates:
+        csv_candidates.append(repo_csv)
+
+    earliest: Optional[pd.Timestamp] = None
+    for csv_path in csv_candidates:
+        if not csv_path.exists():
+            continue
+        try:
+            df = pd.read_csv(csv_path, encoding="utf-8-sig")
+        except Exception:
+            continue
+        if "announce_date" not in df.columns:
+            continue
+        dates = pd.to_datetime(df["announce_date"], errors="coerce").dropna()
+        if dates.empty:
+            continue
+        cand = dates.min()
+        if earliest is None or cand < earliest:
+            earliest = cand
+
+    db_candidates = []
+    if sqlite_path:
+        db_candidates.append(Path(sqlite_path).expanduser().resolve())
+    default_db = Path(__file__).resolve().parent / "repurchase.db"
+    if default_db.exists() and default_db not in db_candidates:
+        db_candidates.append(default_db)
+
+    for db_path in db_candidates:
+        if not db_path.exists():
+            continue
+        try:
+            conn = sqlite3.connect(db_path)
+        except Exception:
+            continue
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT MIN(announce_date) FROM ak_plans")
+            row = cur.fetchone()
+        except Exception:
+            row = None
+        finally:
+            conn.close()
+        if not row or not row[0]:
+            continue
+        cand = pd.to_datetime(row[0], errors="coerce")
+        if pd.isna(cand):
+            continue
+        if earliest is None or cand < earliest:
+            earliest = cand
+
+    return earliest.date() if earliest is not None else None
+
+
 def detect_fetch_runner_start() -> Optional[date]:
     cfg_path = getattr(fetch_runner, "PARAMS_PATH", Path(__file__).resolve().parent / "repurchase_params.json")
     try:
@@ -203,7 +262,11 @@ def detect_fetch_runner_start() -> Optional[date]:
     if not api_base or not params:
         return None
 
-    df = fetch_runner.fetch_all(api_base, params, referer, max_pages=20, sleep_s=0.7)
+    try:
+        df = fetch_runner.fetch_all(api_base, params, referer, max_pages=10, sleep_s=0.7)
+    except Exception as exc:
+        print(f"[WARN] fetch_runner 获取最早公告日失败: {exc}")
+        return None
     if df.empty:
         return None
 
@@ -232,10 +295,15 @@ def main():
     raw = load_akshare_raw()
     min_date = None
     if args.days <= 0:
-        min_date = detect_fetch_runner_start()
+        min_date = detect_existing_plans_start(args.outdir, args.sqlite)
         if min_date:
             today = pd.Timestamp.utcnow().normalize().date()
-            print(f"[INFO] 使用 fetch_runner 最早可获取的公告日期 {min_date} 至 {today} 作为过滤范围")
+            print(f"[INFO] 使用本地历史数据最早公告日 {min_date} 至 {today} 作为过滤范围")
+        else:
+            min_date = detect_fetch_runner_start()
+            if min_date:
+                today = pd.Timestamp.utcnow().normalize().date()
+                print(f"[INFO] 使用 fetch_runner 最早可获取的公告日期 {min_date} 至 {today} 作为过滤范围")
     raw = filter_recent(raw, args.days, min_date=min_date)
 
     if raw.empty:

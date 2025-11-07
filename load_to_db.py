@@ -1,7 +1,7 @@
 # load_to_db.py
 import sqlite3, pandas as pd
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Optional, Tuple
 
 BASE_DIR = Path(__file__).resolve().parent
 DB = BASE_DIR / "repurchase.db"
@@ -158,24 +158,59 @@ def load_plan_reference(conn: sqlite3.Connection) -> pd.DataFrame:
     return plans
 
 
-def assign_plan_keys(buy_df: pd.DataFrame, plan_df: pd.DataFrame) -> pd.DataFrame:
-    if buy_df.empty or plan_df.empty:
-        return buy_df
+def build_plan_lookup(plan_df: pd.DataFrame) -> Dict[str, list[dict[str, Any]]]:
+    if plan_df.empty:
+        return {}
 
     plans = plan_df.copy()
-    plans = plans.dropna(subset=["announce_date"])
+    plans["code"] = plans["code"].apply(normalize_code_value)
+    plans = plans.dropna(subset=["code"])
     if plans.empty:
-        return buy_df
+        return {}
 
     plans = plans.rename(columns={"announce_date": "announce_dt"})
     plans["announce_dt"] = pd.to_datetime(plans["announce_dt"], errors="coerce")
     plans["start_dt"] = pd.to_datetime(plans.get("start_date"), errors="coerce")
     plans = plans.dropna(subset=["announce_dt"])
+    if plans.empty:
+        return {}
+
     plans = plans.sort_values(["code", "announce_dt", "plan_key"], kind="mergesort").reset_index(drop=True)
 
-    plan_dict: dict[str, list[dict[str, Any]]] = {}
+    plan_dict: Dict[str, list[dict[str, Any]]] = {}
     for code, group in plans.groupby("code", sort=False):
         plan_dict[str(code)] = group.to_dict("records")
+    return plan_dict
+
+
+def resolve_plan_key(code: Any, date_val: Any, plan_lookup: Dict[str, list[dict[str, Any]]]) -> Optional[str]:
+    if not plan_lookup:
+        return None
+    code_val = normalize_code_value(code)
+    if pd.isna(code_val):
+        return None
+    candidates = plan_lookup.get(str(code_val))
+    if not candidates:
+        return None
+    dt = pd.to_datetime(date_val, errors="coerce")
+    if pd.isna(dt):
+        return None
+    for plan in reversed(candidates):
+        ann = plan.get("announce_dt")
+        if pd.isna(ann) or ann > dt:
+            continue
+        start_dt = plan.get("start_dt")
+        if pd.notna(start_dt) and start_dt > dt:
+            continue
+        chosen_key = plan.get("plan_key")
+        if chosen_key:
+            return chosen_key
+    return None
+
+
+def assign_plan_keys(buy_df: pd.DataFrame, plan_lookup: Dict[str, list[dict[str, Any]]]) -> pd.DataFrame:
+    if buy_df.empty or not plan_lookup:
+        return buy_df
 
     work = buy_df.reset_index(drop=True).copy()
     work["plan_key"] = work["plan_key"].fillna("").astype(str).str.strip()
@@ -183,31 +218,62 @@ def assign_plan_keys(buy_df: pd.DataFrame, plan_df: pd.DataFrame) -> pd.DataFram
     work["date_dt"] = pd.to_datetime(work["date"], errors="coerce")
 
     for idx, row in work.iterrows():
-        date_val = row.get("date_dt")
-        if pd.isna(date_val):
-            continue
-        code_val = row.get("code")
-        if pd.isna(code_val):
-            continue
-        candidates = plan_dict.get(str(code_val))
-        if not candidates:
-            continue
-        chosen_key = None
-        for plan in reversed(candidates):
-            ann = plan.get("announce_dt")
-            if pd.isna(ann) or ann > date_val:
-                continue
-            start_dt = plan.get("start_dt")
-            if pd.notna(start_dt) and start_dt > date_val:
-                continue
-            chosen_key = plan.get("plan_key")
-            if chosen_key:
-                break
+        chosen_key = resolve_plan_key(row.get("code"), row.get("date_dt"), plan_lookup)
         if chosen_key:
             work.at[idx, "plan_key"] = chosen_key
 
     work.drop(columns=["date_dt"], inplace=True)
     return work
+
+
+def rehydrate_existing_plan_keys(
+    conn: sqlite3.Connection,
+    plan_lookup: Dict[str, list[dict[str, Any]]]
+) -> Tuple[int, int]:
+    if not plan_lookup:
+        return (0, 0)
+
+    legacy_df = pd.read_sql_query(
+        "SELECT rowid, code, plan_key, date FROM buyback WHERE plan_key LIKE ?",
+        conn,
+        params=(f"{LEGACY_PLAN_PREFIX}%",),
+    )
+    if legacy_df.empty:
+        return (0, 0)
+
+    legacy_df["code"] = legacy_df["code"].apply(normalize_code_value)
+    reassigned = assign_plan_keys(legacy_df, plan_lookup)
+
+    cur = conn.cursor()
+    updated = 0
+    deleted = 0
+    for row in reassigned.itertuples(index=False):
+        new_key = getattr(row, "plan_key", None)
+        if not isinstance(new_key, str) or not new_key or new_key.startswith(LEGACY_PLAN_PREFIX):
+            continue
+        code_val = getattr(row, "code", None)
+        date_val = getattr(row, "date", None)
+        rowid = getattr(row, "rowid")
+        if code_val is None or date_val is None:
+            continue
+        if pd.isna(code_val) or pd.isna(date_val):
+            continue
+        code_str = str(code_val)
+        date_str = str(date_val)
+        cur.execute(
+            "SELECT 1 FROM buyback WHERE code = ? AND plan_key = ? AND date = ?",
+            (code_str, new_key, date_str),
+        )
+        if cur.fetchone():
+            cur.execute("DELETE FROM buyback WHERE rowid = ?", (rowid,))
+            deleted += 1
+            continue
+        cur.execute("UPDATE buyback SET plan_key = ? WHERE rowid = ?", (new_key, rowid))
+        updated += 1
+
+    if updated or deleted:
+        conn.commit()
+    return (updated, deleted)
 
 
 def normalize_types(df: pd.DataFrame) -> pd.DataFrame:
@@ -309,7 +375,15 @@ def load_to_db(
     conn = sqlite3.connect(db_path)
     ensure_buyback_table(conn)
     plan_reference = load_plan_reference(conn)
-    df = assign_plan_keys(df, plan_reference)
+    plan_lookup = build_plan_lookup(plan_reference)
+
+    updated, deleted = rehydrate_existing_plan_keys(conn, plan_lookup)
+    if updated or deleted:
+        print(
+            f"[INFO] 修复历史计划匹配：更新 {updated} 条，删除 {deleted} 条冗余记录"
+        )
+
+    df = assign_plan_keys(df, plan_lookup)
 
     if not df.empty:
         df["plan_key"] = df["plan_key"].fillna(pd.NA)
