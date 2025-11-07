@@ -832,7 +832,9 @@ async function renderDashboard(triggerButton) {
     }
     renderTable(currentRows, data.summary);
   } catch (err) {
-    $("summary").innerText = err.message || "加载失败";
+    const message = err && err.message ? err.message : "加载失败";
+    setTablePlaceholder(message);
+    $("summary").innerText = message;
     console.error(err);
   }
 }
@@ -846,7 +848,11 @@ function resetFilters() {
   if (dateTo) dateTo.value = dateFrom ? dateFrom.dataset.max : dateTo.value;
   if (code) code.value = "";
   if (limit) limit.value = "1000";
-  setActiveRange(document.querySelector('.range-btns button[data-range="30"]'));
+  const defaultBtn = document.querySelector('.range-btns button[data-range="30"]');
+  if (defaultBtn) {
+    applyQuickRange(30);
+    setActiveRange(defaultBtn);
+  }
 }
 
 
@@ -898,12 +904,18 @@ document.addEventListener("DOMContentLoaded", function registerEvents() {
     dateTo.value = dateTo.getAttribute("max");
   }
 
-  const defaultRangeBtn = document.querySelector('.range-btns button.active');
-  if (defaultRangeBtn && defaultRangeBtn.dataset.range) {
-    const defaultDays = parseInt(defaultRangeBtn.dataset.range, 10);
-    if (!isNaN(defaultDays)) {
-      applyQuickRange(defaultDays);
-      setActiveRange(defaultRangeBtn);
+  const explicitDefaultBtn = document.querySelector('.range-btns button[data-range="30"]');
+  if (explicitDefaultBtn) {
+    applyQuickRange(30);
+    setActiveRange(explicitDefaultBtn);
+  } else {
+    const defaultRangeBtn = document.querySelector('.range-btns button.active');
+    if (defaultRangeBtn && defaultRangeBtn.dataset.range) {
+      const defaultDays = parseInt(defaultRangeBtn.dataset.range, 10);
+      if (!isNaN(defaultDays)) {
+        applyQuickRange(defaultDays);
+        setActiveRange(defaultRangeBtn);
+      }
     }
   }
 
@@ -913,8 +925,8 @@ document.addEventListener("DOMContentLoaded", function registerEvents() {
     if (tableInstance) tableInstance.redraw(true);
   });
 
-  const defaultBtn = document.querySelector('.range-btns button.active');
-  renderDashboard(defaultBtn);
+  const defaultBtn = explicitDefaultBtn || document.querySelector('.range-btns button.active');
+  renderDashboard(defaultBtn || null);
 
   ensureTabulatorReady().catch(function onTableErr(err) {
     console.warn(err);
