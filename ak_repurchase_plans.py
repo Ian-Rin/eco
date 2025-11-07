@@ -13,11 +13,14 @@ ak_plans_min.py
 import json
 import os, re, argparse, hashlib, sqlite3
 from datetime import timedelta, date
-from typing import Optional
+from typing import Optional, Tuple
 import pandas as pd
 from pathlib import Path
 
 import fetch_runner
+
+
+DEFAULT_AUTO_WINDOW_DAYS = 183
 
 def load_akshare_raw() -> pd.DataFrame:
     import akshare as ak
@@ -189,23 +192,33 @@ def filter_recent(df: pd.DataFrame, days: int, min_date: Optional[date] = None) 
     return df.loc[mask]
 
 
-def detect_fetch_runner_start() -> Optional[date]:
+def detect_fetch_runner_start() -> Tuple[Optional[date], bool]:
     cfg_path = getattr(fetch_runner, "PARAMS_PATH", Path(__file__).resolve().parent / "repurchase_params.json")
     try:
         with open(cfg_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
     except Exception:
-        return None
+        return None, False
 
     api_base = cfg.get("api_base")
     params = cfg.get("params") or {}
     referer = cfg.get("referer")
     if not api_base or not params:
-        return None
+        return None, False
 
-    df = fetch_runner.fetch_all(api_base, params, referer, max_pages=20, sleep_s=0.7)
+    try:
+        df = fetch_runner.fetch_all(api_base, params, referer, max_pages=20, sleep_s=0.7)
+    except Exception as exc:
+        today = pd.Timestamp.utcnow().normalize().date()
+        fallback_start = today - timedelta(days=DEFAULT_AUTO_WINDOW_DAYS)
+        print(
+            f"[WARN] fetch_runner 获取公告日期范围失败: {exc}. "
+            f"将使用最近 {DEFAULT_AUTO_WINDOW_DAYS} 天窗口兜底。"
+        )
+        return fallback_start, True
+
     if df.empty:
-        return None
+        return None, False
 
     df = fetch_runner.normalize(df)
     for cand in ["公告日期", "披露日期", "TDATE", "NOTICE_DATE", "ANNOUNCE_DATE"]:
@@ -213,8 +226,8 @@ def detect_fetch_runner_start() -> Optional[date]:
             dates = pd.to_datetime(df[cand], errors="coerce")
             dates = dates.dropna()
             if not dates.empty:
-                return dates.min().date()
-    return None
+                return dates.min().date(), False
+    return None, False
 
 
 def main():
@@ -231,11 +244,17 @@ def main():
 
     raw = load_akshare_raw()
     min_date = None
+    used_fallback_window = False
     if args.days <= 0:
-        min_date = detect_fetch_runner_start()
+        min_date, used_fallback_window = detect_fetch_runner_start()
         if min_date:
             today = pd.Timestamp.utcnow().normalize().date()
-            print(f"[INFO] 使用 fetch_runner 最早可获取的公告日期 {min_date} 至 {today} 作为过滤范围")
+            if used_fallback_window:
+                print(
+                    f"[INFO] 使用兜底窗口 {min_date} 至 {today} (最近 {DEFAULT_AUTO_WINDOW_DAYS} 天) 作为过滤范围"
+                )
+            else:
+                print(f"[INFO] 使用 fetch_runner 最早可获取的公告日期 {min_date} 至 {today} 作为过滤范围")
     raw = filter_recent(raw, args.days, min_date=min_date)
 
     if raw.empty:
