@@ -1,6 +1,7 @@
 let trendChartInstance = null;
 let topChartInstance = null;
 let tableInstance = null;
+let pendingTablePlaceholder = "加载中...";
 let currentRows = [];
 let lastSummary = null;
 let lastCharts = null;
@@ -508,6 +509,13 @@ function buildTableColumns() {
   ];
 }
 
+function setTablePlaceholder(message) {
+  pendingTablePlaceholder = message || "";
+  if (tableInstance && typeof tableInstance.updateOptions === "function") {
+    tableInstance.updateOptions({ placeholder: pendingTablePlaceholder });
+  }
+}
+
 function ensureTable() {
   if (tableInstance) {
     return tableInstance;
@@ -525,7 +533,7 @@ function ensureTable() {
     height: "520px",
     reactiveData: false,
     selectable: false,
-    placeholder: "选定区间内没有匹配数据",
+    placeholder: pendingTablePlaceholder,
     rowHeight: 76,
     columnDefaults: {
       headerHozAlign: "left",
@@ -547,6 +555,9 @@ function ensureTable() {
       }
     }
   });
+  if (pendingTablePlaceholder) {
+    setTablePlaceholder(pendingTablePlaceholder);
+  }
   return tableInstance;
 }
 
@@ -716,6 +727,7 @@ function renderTable(rows, summary) {
 
   if (!Array.isArray(rows) || rows.length === 0) {
     tableMetrics = null;
+    setTablePlaceholder("选定区间内没有匹配数据");
     table.clearData();
     table.redraw(true);
     $("summary").innerText = "暂无数据";
@@ -798,6 +810,7 @@ async function renderDashboard(triggerButton) {
   if (triggerButton) setActiveRange(triggerButton);
   try {
     $("summary").innerText = "加载中...";
+    setTablePlaceholder("加载中...");
     const data = await fetchDashboard();
     currentRows = Array.isArray(data.table) ? data.table.slice() : [];
     lastSummary = data.summary;
