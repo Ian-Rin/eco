@@ -393,29 +393,39 @@
       border-radius: 0 0 14px 14px;
       max-height: 520px;
     }
+    .tabulator .tabulator-table {
+      background: transparent;
+      color: var(--text-primary);
+    }
     .tabulator .tabulator-cell {
       padding: 14px 16px;
       border-right: 1px solid var(--table-border);
       background: transparent;
       white-space: normal;
       line-height: 1.5;
+      color: inherit;
     }
     .tabulator .tabulator-cell:last-child {
       border-right: none;
     }
     .tabulator-row {
-      background: transparent;
+      background: transparent !important;
       border-bottom: 1px solid var(--table-border);
       transition: background 0.2s ease;
+      color: var(--text-primary);
+    }
+    .tabulator-row.tabulator-row-even,
+    .tabulator-row.tabulator-row-odd {
+      background: transparent !important;
     }
     .tabulator-row:hover {
-      background: var(--table-row-hover);
+      background: var(--table-row-hover) !important;
     }
     .tabulator-row.tabulator-row--latest {
-      background: rgba(56, 189, 248, 0.08);
+      background: rgba(56, 189, 248, 0.12) !important;
     }
     body.light-theme .tabulator-row.tabulator-row--latest {
-      background: rgba(56, 189, 248, 0.12);
+      background: rgba(56, 189, 248, 0.16) !important;
     }
     .tabulator-placeholder {
       color: var(--text-muted);
