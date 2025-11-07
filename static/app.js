@@ -810,7 +810,7 @@ async function renderDashboard(triggerButton) {
   if (triggerButton) setActiveRange(triggerButton);
   try {
     $("summary").innerText = "加载中...";
-    setTablePlaceholder("加载中...");
+    setTablePlaceholder("请选择起始日期和结束日期，并按下刷新按钮以启动");
     const data = await fetchDashboard();
     currentRows = Array.isArray(data.table) ? data.table.slice() : [];
     lastSummary = data.summary;
