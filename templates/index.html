@@ -393,10 +393,15 @@
       border-radius: 0 0 14px 14px;
       max-height: 520px;
     }
+    body.dark-theme .tabulator .tabulator-tableholder,
+    body.dark-theme .tabulator .tabulator-tableholder .tabulator-table {
+      background: transparent;
+    }
     .tabulator .tabulator-table {
       background: transparent;
       color: var(--text-primary);
     }
+    .tabulator .tabulator-row .tabulator-cell,
     .tabulator .tabulator-cell {
       padding: 14px 16px;
       border-right: 1px solid var(--table-border);
@@ -408,23 +413,23 @@
     .tabulator .tabulator-cell:last-child {
       border-right: none;
     }
-    .tabulator-row {
+    .tabulator .tabulator-row {
       background: transparent !important;
       border-bottom: 1px solid var(--table-border);
       transition: background 0.2s ease;
       color: var(--text-primary);
     }
-    .tabulator-row.tabulator-row-even,
-    .tabulator-row.tabulator-row-odd {
+    .tabulator .tabulator-row.tabulator-row-even,
+    .tabulator .tabulator-row.tabulator-row-odd {
       background: transparent !important;
     }
-    .tabulator-row:hover {
+    .tabulator .tabulator-row:hover {
       background: var(--table-row-hover) !important;
     }
-    .tabulator-row.tabulator-row--latest {
+    .tabulator .tabulator-row.tabulator-row--latest {
       background: rgba(56, 189, 248, 0.12) !important;
     }
-    body.light-theme .tabulator-row.tabulator-row--latest {
+    body.light-theme .tabulator .tabulator-row.tabulator-row--latest {
       background: rgba(56, 189, 248, 0.16) !important;
     }
     .tabulator-placeholder {
