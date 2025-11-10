@@ -159,11 +159,48 @@ def to_sqlite(db_path: str, plans: pd.DataFrame):
     );""")
     conn.commit()
     if not plans.empty:
-        plans.to_sql("tmp_ak_plans", conn, if_exists="replace", index=False)
-        cur.executescript("""
-        INSERT OR REPLACE INTO ak_plans
-        SELECT * FROM tmp_ak_plans;
-        DROP TABLE tmp_ak_plans;""")
+        columns = [
+            "code",
+            "sec_name",
+            "plan_key",
+            "version",
+            "announce_date",
+            "start_date",
+            "price_lower",
+            "price_upper",
+            "amount_upper",
+            "volume_upper",
+            "latest_price",
+            "progress_text",
+        ]
+        sanitized = plans.copy()
+        for col in columns:
+            if col not in sanitized.columns:
+                sanitized[col] = None
+        sanitized = sanitized[columns]
+        sanitized = sanitized.where(pd.notna(sanitized), None)
+        cur.executemany(
+            """
+            INSERT INTO ak_plans(
+                code, sec_name, plan_key, version,
+                announce_date, start_date,
+                price_lower, price_upper, amount_upper, volume_upper,
+                latest_price, progress_text
+            )
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(code, plan_key, version) DO UPDATE SET
+                sec_name=COALESCE(excluded.sec_name, ak_plans.sec_name),
+                announce_date=COALESCE(excluded.announce_date, ak_plans.announce_date),
+                start_date=COALESCE(excluded.start_date, ak_plans.start_date),
+                price_lower=COALESCE(excluded.price_lower, ak_plans.price_lower),
+                price_upper=COALESCE(excluded.price_upper, ak_plans.price_upper),
+                amount_upper=COALESCE(excluded.amount_upper, ak_plans.amount_upper),
+                volume_upper=COALESCE(excluded.volume_upper, ak_plans.volume_upper),
+                latest_price=COALESCE(excluded.latest_price, ak_plans.latest_price),
+                progress_text=COALESCE(excluded.progress_text, ak_plans.progress_text)
+            """,
+            list(sanitized.itertuples(index=False, name=None)),
+        )
         conn.commit()
     conn.close()
 
