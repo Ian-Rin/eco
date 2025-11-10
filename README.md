@@ -34,7 +34,7 @@
    > 脚本会根据现有数据库中的最新日期继续抓取，无新增记录时会安全退出。
 3. **同步回购计划基准表（AkShare）**，生成/更新 `plans_all.csv`、`plans_overlap_hint.csv` 并写入 SQLite：
    ```bash
-   python ak_repurchase_plans.py --sqlite repurchase.db --outdir .
+   python ak_repurchase_plans.py
    ```
    - 使用 `--days N` 可以仅保留最近 N 天公告的计划。
 4. **（如需手动入库）将 CSV 数据写入 SQLite**：
