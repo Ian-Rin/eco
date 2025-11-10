@@ -409,17 +409,23 @@
       border-right: none;
     }
     .tabulator-row {
-      background: transparent !important;
+      background: transparent;
       border-bottom: 1px solid var(--table-border);
       transition: background 0.2s ease;
       color: var(--text-primary);
     }
     .tabulator-row.tabulator-row-even,
     .tabulator-row.tabulator-row-odd {
-      background: transparent !important;
+      background: transparent;
     }
     .tabulator-row:hover {
       background: var(--table-row-hover) !important;
+    }
+    .tabulator-row.tabulator-selected {
+      background: rgba(56, 189, 248, 0.25) !important;
+    }
+    body.light-theme .tabulator-row.tabulator-selected {
+      background: rgba(56, 189, 248, 0.35) !important;
     }
     .tabulator-row.tabulator-row--latest {
       background: rgba(56, 189, 248, 0.12) !important;
