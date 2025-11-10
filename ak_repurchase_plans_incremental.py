@@ -80,17 +80,89 @@ def filter_since(plans_df: pd.DataFrame, since: Optional[pd.Timestamp]) -> pd.Da
     return plans_df.loc[mask]
 
 
+_PLACEHOLDER_LOWER = {
+    "",
+    "--",
+    "—",
+    "nan",
+    "none",
+    "null",
+    "na",
+    "n/a",
+    "待定",
+    "待披露",
+    "不披露",
+    "暂无数据",
+}
+
+
+def _strip_placeholder(value):
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped:
+        return pd.NA
+    lowered = stripped.lower()
+    if lowered in _PLACEHOLDER_LOWER:
+        return pd.NA
+    if stripped in {"—", "--", "暂无数据", "待定", "待披露", "不披露"}:
+        return pd.NA
+    return stripped
+
+
+def _replace_blank_with_na(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    df = df.copy()
+    obj_cols = df.select_dtypes(include="object").columns
+    for col in obj_cols:
+        df[col] = df[col].map(_strip_placeholder)
+    return df
+
+
 def update_plans_csv(increment: pd.DataFrame) -> None:
     if increment.empty:
         return
+    increment = _replace_blank_with_na(increment)
     try:
-        existing = pd.read_csv(PLANS_ALL_CSV, encoding="utf-8-sig") if PLANS_ALL_CSV.exists() else pd.DataFrame()
+        existing = (
+            pd.read_csv(PLANS_ALL_CSV, encoding="utf-8-sig")
+            if PLANS_ALL_CSV.exists()
+            else pd.DataFrame()
+        )
     except Exception:
         existing = pd.DataFrame()
-    combined = pd.concat([existing, increment], ignore_index=True) if not existing.empty else increment.copy()
+    if existing.empty:
+        combined = increment.copy()
+    else:
+        existing = _replace_blank_with_na(existing)
+        key_cols = ["code", "plan_key", "version"]
+        for col in key_cols:
+            if col not in increment.columns:
+                increment[col] = pd.NA
+        for col in key_cols:
+            if col not in existing.columns:
+                existing[col] = pd.NA
+        existing_cols = list(existing.columns)
+        extra_cols = [c for c in increment.columns if c not in existing_cols]
+        all_columns = existing_cols + extra_cols
+        existing = existing.reindex(columns=all_columns)
+        increment = increment.reindex(columns=all_columns)
+        existing_idx = existing.set_index(key_cols)
+        increment_idx = increment.set_index(key_cols)
+        existing_idx.update(increment_idx)
+        new_rows = increment_idx.loc[~increment_idx.index.isin(existing_idx.index)]
+        combined = (
+            pd.concat([existing_idx, new_rows], axis=0)
+            .reset_index()
+            .reindex(columns=all_columns)
+        )
     if not combined.empty:
         combined = combined.drop_duplicates(subset=["code", "plan_key", "version"], keep="last")
-        combined = combined.sort_values(["code", "announce_date", "version"], kind="mergesort")
+        if "announce_date" in combined.columns:
+            combined = combined.sort_values(
+                ["code", "announce_date", "version"], kind="mergesort"
+            )
     PLANS_ALL_CSV.parent.mkdir(parents=True, exist_ok=True)
     combined.to_csv(PLANS_ALL_CSV, index=False, encoding="utf-8-sig")
 
