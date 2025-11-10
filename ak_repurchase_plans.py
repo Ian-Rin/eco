@@ -19,6 +19,35 @@ from pathlib import Path
 
 import fetch_runner
 
+_PLACEHOLDER_LOWER = {
+    "",
+    "--",
+    "—",
+    "nan",
+    "none",
+    "null",
+    "na",
+    "n/a",
+    "待定",
+    "待披露",
+    "不披露",
+    "暂无数据",
+}
+
+
+def _strip_placeholder(value):
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped:
+        return None
+    lowered = stripped.lower()
+    if lowered in _PLACEHOLDER_LOWER:
+        return None
+    if stripped in {"—", "--", "暂无数据", "待定", "待披露", "不披露"}:
+        return None
+    return stripped
+
 def load_akshare_raw() -> pd.DataFrame:
     import akshare as ak
     # 东方财富-股票-回购-回购股份-回购进展（含计划区间&起始时间等），AkShare 会聚合全市场
@@ -65,6 +94,12 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame()
     for k, v in m.items():
         out[k] = df.get(v)
+
+    for col in ["name", "plan_price_range", "progress"]:
+        if col in out.columns:
+            out[col] = out[col].apply(_strip_placeholder)
+
+    out["latest_price"] = pd.to_numeric(out.get("latest_price"), errors="coerce")
 
     # 解析价格区间（一般单位：元/股）
     pr_lo, pr_hi = [], []
@@ -142,6 +177,17 @@ def detect_overlap(plans: pd.DataFrame) -> pd.DataFrame:
                     })
     return pd.DataFrame(out).drop_duplicates()
 
+def _coerce_db_value(value):
+    if value is None:
+        return None
+    if pd.isna(value):
+        return None
+    if isinstance(value, str):
+        stripped = _strip_placeholder(value)
+        return stripped
+    return value
+
+
 def to_sqlite(db_path: str, plans: pd.DataFrame):
     if not db_path: return
     directory = os.path.dirname(db_path)
@@ -178,7 +224,8 @@ def to_sqlite(db_path: str, plans: pd.DataFrame):
             if col not in sanitized.columns:
                 sanitized[col] = None
         sanitized = sanitized[columns]
-        sanitized = sanitized.where(pd.notna(sanitized), None)
+        for col in sanitized.columns:
+            sanitized[col] = sanitized[col].map(_coerce_db_value)
         cur.executemany(
             """
             INSERT INTO ak_plans(

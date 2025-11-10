@@ -80,9 +80,50 @@ def filter_since(plans_df: pd.DataFrame, since: Optional[pd.Timestamp]) -> pd.Da
     return plans_df.loc[mask]
 
 
+_PLACEHOLDER_LOWER = {
+    "",
+    "--",
+    "—",
+    "nan",
+    "none",
+    "null",
+    "na",
+    "n/a",
+    "待定",
+    "待披露",
+    "不披露",
+    "暂无数据",
+}
+
+
+def _strip_placeholder(value):
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped:
+        return pd.NA
+    lowered = stripped.lower()
+    if lowered in _PLACEHOLDER_LOWER:
+        return pd.NA
+    if stripped in {"—", "--", "暂无数据", "待定", "待披露", "不披露"}:
+        return pd.NA
+    return stripped
+
+
+def _replace_blank_with_na(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    df = df.copy()
+    obj_cols = df.select_dtypes(include="object").columns
+    for col in obj_cols:
+        df[col] = df[col].map(_strip_placeholder)
+    return df
+
+
 def update_plans_csv(increment: pd.DataFrame) -> None:
     if increment.empty:
         return
+    increment = _replace_blank_with_na(increment)
     try:
         existing = (
             pd.read_csv(PLANS_ALL_CSV, encoding="utf-8-sig")
@@ -94,6 +135,7 @@ def update_plans_csv(increment: pd.DataFrame) -> None:
     if existing.empty:
         combined = increment.copy()
     else:
+        existing = _replace_blank_with_na(existing)
         key_cols = ["code", "plan_key", "version"]
         for col in key_cols:
             if col not in increment.columns:
