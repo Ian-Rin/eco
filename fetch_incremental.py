@@ -4,12 +4,16 @@ import json, sqlite3, pandas as pd, requests, re, time
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-DB = BASE_DIR / "repurchase.db"
+RESULT_DIR = BASE_DIR / "result"
+DB = RESULT_DIR / "repurchase.db"
 CFG = BASE_DIR / "repurchase_params.json"
-INCREMENT_CSV = BASE_DIR / "repurchase_increment.csv"
+INCREMENT_CSV = RESULT_DIR / "repurchase_increment.csv"
 LOADER_PATH = BASE_DIR / "load_to_db.py"
 UA="Mozilla/5.0"
 JSONP_RE=re.compile(r'^[\w$]+\((.*)\)\s*;?\s*$')
+
+def ensure_result_dir():
+    RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
 def parse(text):
     t=text.strip()
@@ -18,6 +22,7 @@ def parse(text):
     return j.loads(m.group(1)) if m else {}
 
 def max_date():
+    ensure_result_dir()
     conn=sqlite3.connect(DB); c=conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS buyback (
@@ -79,6 +84,7 @@ def run_loader():
     print(f"load_to_db executed: {rows} rows merged (sources: {sources})")
 
 if __name__=="__main__":
+    ensure_result_dir()
     with open(CFG,"r",encoding="utf-8") as f: cfg=json.load(f)
     since=max_date()
     print("since", since)
