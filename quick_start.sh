@@ -19,7 +19,7 @@ run_python() {
 }
 
 run_python "fetch_incremental.py"
-run_python "ak_repurchase_plans.py"
+run_python "ak_repurchase_plans.py_incremental"
 
 echo "[INFO] Starting FastAPI server via uvicorn"
 exec uvicorn app_fastapi:app --host 0.0.0.0 --port 8000
