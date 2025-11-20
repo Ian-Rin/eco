@@ -290,37 +290,43 @@ def rehydrate_existing_plan_keys(
 
 
 def normalize_types(df: pd.DataFrame) -> pd.DataFrame:
-    def pick(colnames):
+    def coalesce(colnames):
+        base = None
         for c in colnames:
-            if c in df.columns:
-                return c
-        return None
+            if c not in df.columns:
+                continue
+            series = df[c]
+            base = series if base is None else base.combine_first(series)
+        if base is None:
+            base = pd.Series(pd.NA, index=df.index)
+        return base
 
-    code = pick(["股票代码","SECURITY_CODE","SCODE"])
-    name = pick(["股票简称","SECURITY_NAME_ABBR","SNAME"])
-    date = pick(["披露日期","记录日期","公告日期","TDATE","JLRQ","NOTICE_DATE","ANNOUNCE_DATE"])
-    amount = pick(["已回购金额","BUYBACK_AMT","HGJE"])
-    volume = pick(["已回购数量","BUYBACK_VOL","HGSL"])
-    avgp = pick(["已回购均价","HGZDJ"])
-    prog = pick(["回购进度","REPURCHASE_PROGRESS"])
-    sd = pick(["回购开始日期","START_DATE"])
-    ed = pick(["回购截止日期","END_DATE"])
-    plan = pick(["计划编号","PLAN_CODE","PLAN_ID","REPURCHASE_PLAN_ID","REPURCHASE_ID","BUYBACK_PLAN_CODE"])
+    code = coalesce(["股票代码","SECURITY_CODE","SCODE"])
+    name = coalesce(["股票简称","SECURITY_NAME_ABBR","SNAME"])
+    date = coalesce(["披露日期","记录日期","公告日期","TDATE","JLRQ","NOTICE_DATE","ANNOUNCE_DATE"])
+    amount = coalesce(["已回购金额","BUYBACK_AMT","HGJE"])
+    volume = coalesce(["已回购数量","BUYBACK_VOL","HGSL"])
+    avgp = coalesce(["已回购均价","HGZDJ"])
+    prog = coalesce(["回购进度","REPURCHASE_PROGRESS"])
+    sd = coalesce(["回购开始日期","START_DATE"])
+    ed = coalesce(["回购截止日期","END_DATE"])
+    plan = coalesce(["计划编号","PLAN_CODE","PLAN_ID","REPURCHASE_PLAN_ID","REPURCHASE_ID","BUYBACK_PLAN_CODE"])
 
     def normalize_code(series):
         if series is None:
-            return pd.Series(dtype="string")
+            return pd.Series(pd.NA, index=df.index, dtype="string")
         return series.apply(normalize_code_value).astype("string")
 
     # 日期列安全转换
-    def safe_date(col):
-        if col is None or col not in df.columns:
-            return None
-        return pd.to_datetime(df[col], errors="coerce").dt.date.astype("string")
+    def safe_date(series):
+        if series is None:
+            return pd.Series([None] * len(df))
+        converted = pd.to_datetime(series, errors="coerce").dt.strftime("%Y-%m-%d")
+        return converted.where(converted.notna(), None)
 
     def normalize_plan(series):
         if series is None:
-            return pd.Series(dtype="string")
+            return pd.Series(pd.NA, index=df.index, dtype="string")
 
         def to_plan(value: Any) -> Any:
             if pd.isna(value):
@@ -340,17 +346,21 @@ def normalize_types(df: pd.DataFrame) -> pd.DataFrame:
         return series.apply(to_plan).astype("string")
 
     out = pd.DataFrame({
-        "code": normalize_code(df.get(code)),
-        "plan_key": normalize_plan(df.get(plan)),
-        "name": df.get(name),
+        "code": normalize_code(code),
+        "plan_key": normalize_plan(plan),
+        "name": name,
         "date": safe_date(date),
-        "amount": pd.to_numeric(df.get(amount), errors="coerce"),
-        "volume": pd.to_numeric(df.get(volume), errors="coerce"),
-        "avg_price": pd.to_numeric(df.get(avgp), errors="coerce"),
-        "progress": df.get(prog),
+        "amount": pd.to_numeric(amount, errors="coerce"),
+        "volume": pd.to_numeric(volume, errors="coerce"),
+        "avg_price": pd.to_numeric(avgp, errors="coerce"),
+        "progress": prog,
         "start_date": safe_date(sd),
         "end_date": safe_date(ed),
     })
+
+    for col in ["progress", "start_date", "end_date"]:
+        if col in out.columns:
+            out[col] = out[col].where(pd.notna(out[col]), None)
 
     # 去掉 code/date 缺失的行
     out = out.dropna(subset=["code", "date"])
