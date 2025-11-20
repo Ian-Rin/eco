@@ -11,14 +11,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "repurchase.db"
+RESULT_DIR = BASE_DIR / "result"
+DEFAULT_DB_PATH = RESULT_DIR / "repurchase.db"
+LEGACY_DB_PATH = BASE_DIR / "repurchase.db"
+DB_PATH = DEFAULT_DB_PATH if DEFAULT_DB_PATH.exists() else LEGACY_DB_PATH
 STATIC_DIR = BASE_DIR / "static"
 TEMPLATE_DIR = BASE_DIR / "templates"
 
 LEGACY_PLAN_PREFIX = "__DEFAULT__:"
 
 if not DB_PATH.exists():
-    raise SystemExit(f"数据库不存在：{DB_PATH}，请先运行抓取与入库脚本。")
+    raise SystemExit(f"数据库不存在：{DEFAULT_DB_PATH}，请先运行抓取与入库脚本。")
 
 app = FastAPI(title="A股上市公司回购")
 
@@ -102,12 +105,13 @@ def load_plan_reference() -> pd.DataFrame:
         plans = pd.DataFrame()
 
     if plans.empty:
-        csv_path = BASE_DIR / "plans_all.csv"
-        if csv_path.exists():
-            try:
-                plans = pd.read_csv(csv_path, encoding="utf-8-sig")
-            except Exception:
-                plans = pd.DataFrame()
+        for csv_path in [RESULT_DIR / "plans_all.csv", BASE_DIR / "plans_all.csv"]:
+            if csv_path.exists():
+                try:
+                    plans = pd.read_csv(csv_path, encoding="utf-8-sig")
+                    break
+                except Exception:
+                    plans = pd.DataFrame()
 
     if plans.empty:
         return plans
