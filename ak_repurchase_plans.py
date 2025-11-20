@@ -36,6 +36,28 @@ _PLACEHOLDER_LOWER = {
     "暂无数据",
 }
 
+def normalize_code_str(value):
+    """Force stock code to 6-digit string when possible; fallback to trimmed string."""
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        num = float(s)
+        if num.is_integer():
+            return f"{int(num):06d}"
+    except Exception:
+        pass
+    if s.isdigit() and len(s) < 6:
+        return s.zfill(6)
+    return s
+
 
 def _strip_placeholder(value):
     if not isinstance(value, str):
@@ -96,6 +118,8 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame()
     for k, v in m.items():
         out[k] = df.get(v)
+
+    out["code"] = out["code"].apply(normalize_code_str)
 
     for col in ["name", "plan_price_range", "progress"]:
         if col in out.columns:
@@ -222,12 +246,15 @@ def to_sqlite(db_path: str, plans: pd.DataFrame):
             "progress_text",
         ]
         sanitized = plans.copy()
+        sanitized["code"] = sanitized["code"].apply(normalize_code_str)
         for col in columns:
             if col not in sanitized.columns:
                 sanitized[col] = None
         sanitized = sanitized[columns]
         for col in sanitized.columns:
             sanitized[col] = sanitized[col].map(_coerce_db_value)
+        cur.execute("DELETE FROM ak_plans")
+        conn.commit()
         cur.executemany(
             """
             INSERT INTO ak_plans(
