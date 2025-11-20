@@ -7,8 +7,9 @@ from pathlib import Path
 UA = "Mozilla/5.0"
 JSONP_RE = re.compile(r'^[\w$]+\((.*)\)\s*;?\s*$')
 BASE_DIR = Path(__file__).resolve().parent
+RESULT_DIR = BASE_DIR / "result"
 PARAMS_PATH = BASE_DIR / "repurchase_params.json"
-LATEST_CSV = BASE_DIR / "repurchase_latest.csv"
+LATEST_CSV = RESULT_DIR / "repurchase_latest.csv"
 
 def parse_json_maybe_jsonp(text: str):
     t = text.strip()
@@ -69,6 +70,7 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
 if __name__ == "__main__":
     with open(PARAMS_PATH, "r", encoding="utf-8") as f:
         cfg = json.load(f)
+    RESULT_DIR.mkdir(parents=True, exist_ok=True)
     df = fetch_all(cfg["api_base"], cfg["params"], cfg["referer"], max_pages=20, sleep_s=0.7)
     df = normalize(df)
     df.to_csv(LATEST_CSV, index=False, encoding="utf-8-sig")
