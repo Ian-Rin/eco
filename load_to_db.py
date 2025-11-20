@@ -4,10 +4,14 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 BASE_DIR = Path(__file__).resolve().parent
-DB = BASE_DIR / "repurchase.db"
-LATEST_CSV = BASE_DIR / "repurchase_latest.csv"
-INCREMENT_CSV = BASE_DIR / "repurchase_increment.csv"
-PLANS_CSV = BASE_DIR / "plans_all.csv"
+RESULT_DIR = BASE_DIR / "result"
+DB = RESULT_DIR / "repurchase.db"
+LATEST_CSV = RESULT_DIR / "repurchase_latest.csv"
+INCREMENT_CSV = RESULT_DIR / "repurchase_increment.csv"
+PLANS_CSV = RESULT_DIR / "plans_all.csv"
+LEGACY_LATEST_CSV = BASE_DIR / "repurchase_latest.csv"
+LEGACY_INCREMENT_CSV = BASE_DIR / "repurchase_increment.csv"
+LEGACY_PLANS_CSV = BASE_DIR / "plans_all.csv"
 
 LEGACY_PLAN_PREFIX = "__DEFAULT__:"
 
@@ -26,6 +30,10 @@ CREATE TABLE IF NOT EXISTS buyback (
   PRIMARY KEY (code, plan_key, date)
 );
 """
+
+
+def ensure_result_dir() -> None:
+    RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def ensure_buyback_table(conn: sqlite3.Connection) -> None:
@@ -127,11 +135,16 @@ def load_plan_reference(conn: sqlite3.Connection) -> pd.DataFrame:
     except Exception:
         plans = pd.DataFrame()
 
-    if plans.empty and PLANS_CSV.exists():
-        try:
-            plans = pd.read_csv(PLANS_CSV, encoding="utf-8-sig")
-        except Exception:
-            plans = pd.DataFrame()
+    csv_candidates = [PLANS_CSV, LEGACY_PLANS_CSV]
+    if plans.empty:
+        for csv_path in csv_candidates:
+            if not csv_path.exists():
+                continue
+            try:
+                plans = pd.read_csv(csv_path, encoding="utf-8-sig")
+                break
+            except Exception:
+                plans = pd.DataFrame()
 
     if plans.empty:
         return plans
@@ -361,11 +374,16 @@ def load_to_db(
     increment_csv: Path = INCREMENT_CSV,
     db_path: Path = DB
 ) -> tuple[int, int]:
+    ensure_result_dir()
     sources = []
     if latest_csv.exists():
         sources.append(pd.read_csv(latest_csv))
+    elif latest_csv == LATEST_CSV and LEGACY_LATEST_CSV.exists():
+        sources.append(pd.read_csv(LEGACY_LATEST_CSV))
     if increment_csv.exists():
         sources.append(pd.read_csv(increment_csv))
+    elif increment_csv == INCREMENT_CSV and LEGACY_INCREMENT_CSV.exists():
+        sources.append(pd.read_csv(LEGACY_INCREMENT_CSV))
     if not sources:
         raise SystemExit("No CSV sources found. Expected repurchase_latest.csv and/or repurchase_increment.csv")
 
