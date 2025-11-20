@@ -99,6 +99,28 @@ def ensure_buyback_table(conn: sqlite3.Connection) -> None:
     cur.execute("DROP TABLE IF EXISTS buyback_legacy")
     conn.commit()
 
+def normalize_existing_buyback_codes(conn: sqlite3.Connection) -> tuple[int, int]:
+    try:
+        df = pd.read_sql_query("SELECT * FROM buyback", conn)
+    except Exception:
+        return (0, 0)
+    if df.empty:
+        return (0, 0)
+    before = len(df)
+    df["code"] = df["code"].apply(normalize_code_value)
+    df = df.dropna(subset=["code", "date"])
+    df = df.drop_duplicates(subset=["code", "plan_key", "date"], keep="last")
+
+    cur = conn.cursor()
+    cur.execute("DELETE FROM buyback")
+    conn.commit()
+    cur.executemany("""
+            INSERT INTO buyback(code,plan_key,name,date,amount,volume,avg_price,progress,start_date,end_date)
+            VALUES(?,?,?,?,?,?,?,?,?,?)
+    """, list(df.itertuples(index=False, name=None)))
+    conn.commit()
+    return (before, len(df))
+
 
 def normalize_code_value(value: Any) -> Any:
     if pd.isna(value):
@@ -402,6 +424,9 @@ def load_to_db(
 
     conn = sqlite3.connect(db_path)
     ensure_buyback_table(conn)
+    before_norm, after_norm = normalize_existing_buyback_codes(conn)
+    if before_norm and before_norm != after_norm:
+        print(f"[INFO] 规范化 buyback 表代码列：{before_norm} -> {after_norm}")
     plan_reference = load_plan_reference(conn)
     plan_lookup = build_plan_lookup(plan_reference)
 
