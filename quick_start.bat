@@ -28,7 +28,7 @@ if errorlevel 1 (
 )
 
 call :run_python fetch_incremental.py || exit /b 1
-call :run_python ak_repurchase_plans_incremental.py || exit /b 1
+call :run_python ak_repurchase_plans.py || exit /b 1
 
 echo [INFO] Starting FastAPI server via uvicorn
 uvicorn app_fastapi:app --host 0.0.0.0 --port 8000
