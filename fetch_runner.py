@@ -11,6 +11,22 @@ RESULT_DIR = BASE_DIR / "result"
 PARAMS_PATH = BASE_DIR / "repurchase_params.json"
 LATEST_CSV = RESULT_DIR / "repurchase_latest.csv"
 
+def normalize_code_value(value):
+    if pd.isna(value):
+        return value
+    s = str(value).strip()
+    if not s:
+        return s
+    try:
+        num = float(s)
+        if num.is_integer():
+            return f"{int(num):06d}"
+    except Exception:
+        pass
+    if s.isdigit() and len(s) < 6:
+        return s.zfill(6)
+    return s
+
 def parse_json_maybe_jsonp(text: str):
     t = text.strip()
     if t and t[0] in "{[":
@@ -65,6 +81,9 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
     for k,v in m.items():
         if k in df.columns and v not in df.columns:
             df[v]=df[k]
+    for col in ["股票代码","SCODE","SECURITY_CODE"]:
+        if col in df.columns:
+            df[col] = df[col].apply(normalize_code_value)
     return df
 
 if __name__ == "__main__":
