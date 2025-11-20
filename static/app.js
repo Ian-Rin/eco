@@ -449,6 +449,14 @@ function buildTableColumns() {
       formatter: planFormatter
     },
     {
+      title: "累计进度",
+      field: "progress_pct",
+      minWidth: 220,
+      sorter: "number",
+      headerTooltip: "计划完成度",
+      formatter: progressFormatter
+    },
+    {
       title: "日期",
       field: "date",
       width: 140,
@@ -497,14 +505,6 @@ function buildTableColumns() {
       sorter: "number",
       headerTooltip: "点击排序",
       formatter: avgPriceFormatter
-    },
-    {
-      title: "累计进度",
-      field: "progress_pct",
-      minWidth: 220,
-      sorter: "number",
-      headerTooltip: "计划完成度",
-      formatter: progressFormatter
     }
   ];
 }
