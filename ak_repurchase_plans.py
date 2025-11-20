@@ -19,6 +19,8 @@ from pathlib import Path
 
 import fetch_runner
 
+RESULT_DIR = Path(__file__).resolve().parent / "result"
+
 _PLACEHOLDER_LOWER = {
     "",
     "--",
@@ -277,10 +279,12 @@ def detect_existing_plans_start(outdir: str, sqlite_path: str = "") -> Optional[
     """尝试从现有 CSV/SQLite 中找出最早公告日，避免额外网络请求"""
     csv_candidates = []
     outdir_path = Path(outdir or ".").expanduser().resolve()
-    csv_candidates.append(outdir_path / "plans_all.csv")
-    repo_csv = Path(__file__).resolve().parent / "plans_all.csv"
-    if repo_csv not in csv_candidates:
-        csv_candidates.append(repo_csv)
+    repo_dir = Path(__file__).resolve().parent
+    default_csv = RESULT_DIR / "plans_all.csv"
+    legacy_csv = repo_dir / "plans_all.csv"
+    for candidate in [outdir_path / "plans_all.csv", default_csv, legacy_csv]:
+        if candidate not in csv_candidates:
+            csv_candidates.append(candidate)
 
     earliest: Optional[pd.Timestamp] = None
     for csv_path in csv_candidates:
@@ -302,9 +306,11 @@ def detect_existing_plans_start(outdir: str, sqlite_path: str = "") -> Optional[
     db_candidates = []
     if sqlite_path:
         db_candidates.append(Path(sqlite_path).expanduser().resolve())
-    default_db = Path(__file__).resolve().parent / "repurchase.db"
-    if default_db.exists() and default_db not in db_candidates:
-        db_candidates.append(default_db)
+    default_db = RESULT_DIR / "repurchase.db"
+    legacy_db = Path(__file__).resolve().parent / "repurchase.db"
+    for candidate in [default_db, legacy_db]:
+        if candidate.exists() and candidate not in db_candidates:
+            db_candidates.append(candidate)
 
     for db_path in db_candidates:
         if not db_path.exists():
@@ -366,7 +372,7 @@ def detect_fetch_runner_start() -> Optional[date]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--outdir", default=".")
+    ap.add_argument("--outdir", default=str(RESULT_DIR))
     ap.add_argument("--sqlite", default="", help="写入 SQLite 的文件名（可选）")
     ap.add_argument(
         "--days",
