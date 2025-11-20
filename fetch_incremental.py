@@ -15,6 +15,28 @@ JSONP_RE=re.compile(r'^[\w$]+\((.*)\)\s*;?\s*$')
 def ensure_result_dir():
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
+def normalize_code_value(value):
+    if pd.isna(value):
+        return value
+    s=str(value).strip()
+    if not s:
+        return s
+    try:
+        num=float(s)
+        if num.is_integer():
+            return f"{int(num):06d}"
+    except Exception:
+        pass
+    if s.isdigit() and len(s)<6:
+        return s.zfill(6)
+    return s
+
+def normalize_codes(df: pd.DataFrame) -> pd.DataFrame:
+    for col in ["SCODE","股票代码","SECURITY_CODE","code","CODE"]:
+        if col in df.columns:
+            df[col] = df[col].apply(normalize_code_value)
+    return df
+
 def parse(text):
     t=text.strip()
     if t and t[0] in "{[": import json as j; return j.loads(t)
@@ -53,7 +75,7 @@ def fetch_since(api_base, params, referer, since_date):
         res=(j.get("result") or j.get("data",{}).get("result") or {})
         data=res.get("data") or []
         if not data: break
-        df=pd.DataFrame(data)
+        df=normalize_codes(pd.DataFrame(data))
         # 只保留 >= since_date 的
         dt_col=None
         for cand in ["TDATE","JLRQ","NOTICE_DATE","ANNOUNCE_DATE"]:
