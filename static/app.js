@@ -8,6 +8,7 @@ let lastCharts = null;
 let tableMetrics = null;
 let echartsReadyPromise = null;
 let tabulatorReadyPromise = null;
+let tableReadyPromise = null;
 
 function ensureEchartsLoaded() {
   if (typeof window.echarts !== "undefined") {
@@ -189,6 +190,38 @@ function ensureTabulatorReady() {
     });
   }
   return tabulatorReadyPromise;
+}
+
+function waitForTableReady() {
+  if (tableReadyPromise) {
+    return tableReadyPromise;
+  }
+  tableReadyPromise = ensureTabulatorReady().then(function onTabReady() {
+    const table = ensureTable();
+    if (!table) {
+      throw new Error("表格组件初始化失败");
+    }
+    if (table.initialized) {
+      return table;
+    }
+    return new Promise(function wait(resolve) {
+      if (typeof table.on === "function") {
+        const handleBuilt = function handleBuilt() {
+          if (typeof table.off === "function") {
+            table.off("tableBuilt", handleBuilt);
+          }
+          resolve(table);
+        };
+        table.on("tableBuilt", handleBuilt);
+      } else {
+        resolve(table);
+      }
+    });
+  }).catch(function reset(err) {
+    tableReadyPromise = null;
+    throw err;
+  });
+  return tableReadyPromise;
 }
 
 function escapeHtml(value) {
@@ -713,24 +746,17 @@ function renderTop(top) {
 }
 
 function renderTable(rows, summary) {
-  const table = ensureTable();
-  if (!table) {
-    $("summary").innerText = "表格组件加载中...";
-    ensureTabulatorReady().then(function onReady() {
-      renderTable(rows, summary);
-    }).catch(function onErr(err) {
-      $("summary").innerText = err.message || "表格组件加载失败";
-      console.error(err);
-    });
-    return;
-  }
-
-  if (!Array.isArray(rows) || rows.length === 0) {
+  const hasData = Array.isArray(rows) && rows.length > 0;
+  if (!hasData) {
     tableMetrics = null;
     setTablePlaceholder("选定区间内没有匹配数据");
-    table.clearData();
-    table.redraw(true);
     $("summary").innerText = "暂无数据";
+    waitForTableReady().then(function onReady(table) {
+      table.clearData();
+      table.redraw(true);
+    }).catch(function onErr(err) {
+      console.error("表格组件加载失败", err);
+    });
     return;
   }
 
@@ -759,14 +785,18 @@ function renderTable(rows, summary) {
     latestDate: summary && summary.latest_date ? summary.latest_date : null
   };
 
-  const preparedRows = rows.map(function clone(row) {
-    return Object.assign({}, row);
-  });
-
-  table.setData(preparedRows).then(function onSet() {
-    table.redraw(true);
-  }).catch(function handleTableError(err) {
-    console.error("表格数据加载失败", err);
+  waitForTableReady().then(function onReady(table) {
+    const preparedRows = rows.map(function clone(row) {
+      return Object.assign({}, row);
+    });
+    table.setData(preparedRows).then(function onSet() {
+      table.redraw(true);
+    }).catch(function handleTableError(err) {
+      console.error("表格数据加载失败", err);
+    });
+  }).catch(function onInitErr(err) {
+    setTablePlaceholder(err.message || "表格组件加载失败");
+    console.error(err);
   });
 
   const totalLabel = summary
